@@ -57,8 +57,9 @@ class Backend(Protocol):
         ...
 
     def daemon_status(self) -> dict[str, Any]:
-        """`{"state", "stt_model", "final_model", "cleanup",
-        "health_checked_s_ago"}`. `cleanup` is "disabled", "offline" or
+        """`{"state", "stt_model", "final_model", "stt_missing", "cleanup",
+        "health_checked_s_ago"}`. `stt_missing` lists model files the saved
+        `[stt]` choice needs and the disk lacks. `cleanup` is "disabled", "offline" or
         "ready"; `health_checked_s_ago` is seconds since the last LLM health
         probe, or None before the first."""
         ...

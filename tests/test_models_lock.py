@@ -136,3 +136,34 @@ def test_a_file_in_a_model_directory_is_pinned_by_its_relative_path(tmp_path: Pa
     lock_path.write_text(json.dumps(doc))
     assert doc["models"][0]["name"] == "parakeet/tokens.txt"
     assert verify_models(lock_path, models) == []
+
+
+# --- which STT files the selection needs ---------------------------------------
+
+
+def test_missing_stt_files_names_every_absent_parakeet_file(tmp_path: Path) -> None:
+    from flowd.models import missing_stt_files
+
+    model = tmp_path / "parakeet"
+    model.mkdir()
+    (model / "tokens.txt").write_text("x")
+    assert missing_stt_files("parakeet-redecode", "parakeet", tmp_path) == [
+        "parakeet/encoder.int8.onnx",
+        "parakeet/decoder.int8.onnx",
+        "parakeet/joiner.int8.onnx",
+    ]
+
+
+def test_missing_stt_files_is_empty_when_everything_is_there(tmp_path: Path) -> None:
+    from flowd.models import PARAKEET_FILES, missing_stt_files
+
+    (tmp_path / "parakeet").mkdir()
+    for name in PARAKEET_FILES:
+        (tmp_path / "parakeet" / name).write_text("x")
+    assert missing_stt_files("parakeet-redecode", "parakeet", tmp_path) == []
+
+
+def test_missing_stt_files_needs_nothing_without_a_final_model(tmp_path: Path) -> None:
+    from flowd.models import missing_stt_files
+
+    assert missing_stt_files("small-streaming-en", "", tmp_path) == []

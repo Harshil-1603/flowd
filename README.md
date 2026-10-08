@@ -93,9 +93,11 @@ The full architecture is in [`docs/spec.md`](docs/spec.md), edge cases in
 - A CPU with AVX2 (AVX-512 is not required)
 - About 1.1 GB of disk space for the models
 
-flowd was developed on a 6-core Ryzen 5 5600H, where streaming transcription
-runs at about 1.05× realtime. On a slower machine, set `stt.model` to
-`small-streaming-en` or `tiny-streaming-en` (see [Configuration](#configuration)).
+flowd was developed on a 6-core Ryzen 5 5600H. The live preview re-decodes the
+words you are saying with Parakeet, which takes about 2.3 s of CPU per second of
+audio while you dictate. On a slower machine, set `stt.model` to
+`small-streaming-en` (Moonshine, about 4 s of CPU per second of audio on the
+owner's voice, but streaming) or see [Configuration](#configuration).
 
 ### Quick install (Arch Linux)
 
@@ -438,8 +440,8 @@ device = "default"
 max_session_s = 300
 
 [stt]
-model = "small-streaming-en"    # or medium-streaming-en, tiny-streaming-en
-final_model = "parakeet-tdt-0.6b-v2-int8"  # commits the text; "" lets Moonshine commit
+model = "parakeet-redecode"     # the live preview; or small-streaming-en, medium-streaming-en (legacy Moonshine)
+final_model = "parakeet-tdt-0.6b-v2-int8"  # commits the text; "" lets Moonshine commit (needs a Moonshine model above)
 
 [inject]
 order = ["clipboard", "wtype", "ydotool", "xdotool"]
@@ -673,7 +675,7 @@ records each one by check number, never with the text.
 |---|---|---|
 | 2 | A model file does not match `models.lock` | Run `scripts/fetch_models.sh`. systemd does not retry this one. |
 | 3 | The config file is invalid | The reason is on the line above, e.g. `flowd: invalid config: block_ms ...`. Fix `~/.config/flowd/config.toml`. |
-| 4 | A speech model failed to load | Usually a partial download: run `scripts/fetch_models.sh`. To run on Moonshine alone, set `[stt] final_model = ""`. |
+| 4 | A speech model failed to load | Usually a partial download: run `scripts/fetch_models.sh`. To run on Moonshine alone, set `[stt] model = "small-streaming-en"` and `final_model = ""`. |
 | 5 | An audio stream would not stop | systemd restarts flowd, which releases the microphone. If it repeats, check the log for the device that hung. |
 
 After fixing it, `systemctl --user reset-failed flowd` lets systemd try again.

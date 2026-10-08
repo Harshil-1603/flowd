@@ -212,16 +212,16 @@
       <!-- ============================================================ 4 RECOGNITION -->
       <section class="sec" id="recognition" aria-labelledby="h-rec">
         <h2 id="h-rec" tabindex="-1">Recognition</h2>
-        <p class="lede">Two local models: a fast one for the live preview, and a more accurate one for the text that gets pasted.</p>
+        <p class="lede">Two jobs: a live preview while you speak, and the accurate text that gets pasted. By default one model, Parakeet, does both.</p>
         <div class="group">
           <div class="group-head"><h3>Models</h3><button class="link-btn" data-reset="stt"><i data-icon="rotate-ccw" data-size="12"></i>Reset to defaults</button></div>
           <div class="rows">
             <div class="row">
-              <div class="lab"><div class="t" id="l-pm">Preview model</div><div class="d">Drives the words you see while speaking.</div></div>
-              <div class="ctl"><span class="select-wrap"><select class="input" aria-labelledby="l-pm" data-key="stt.model"><option value="small-streaming-en" selected>Moonshine small streaming (default)</option><option value="medium-streaming-en">Moonshine medium streaming (+190 MB)</option></select><i data-icon="chevron-down" data-size="14"></i></span><span class="feedback" aria-hidden="true"></span></div>
+              <div class="lab"><div class="t" id="l-pm">Preview model</div><div class="d" id="d-pm">Drives the words you see while speaking. Changing it needs a flowd restart.</div></div>
+              <div class="ctl"><span class="select-wrap"><select class="input" aria-labelledby="l-pm" aria-describedby="d-pm" data-key="stt.model"><option value="parakeet-redecode" selected>Parakeet re-decode (default: most accurate, no extra memory, higher CPU)</option><option value="small-streaming-en">Moonshine small (legacy)</option><option value="medium-streaming-en">Moonshine medium (legacy, +190 MB)</option></select><i data-icon="chevron-down" data-size="14"></i></span><span class="feedback" aria-hidden="true"></span></div>
             </div>
             <div class="row">
-              <div class="lab"><div class="t" id="l-fm">Final transcript model</div><div class="d">Better accuracy on the pasted text. Adds about 1 GB of memory.</div></div>
+              <div class="lab"><div class="t" id="l-fm">Final transcript model</div><div class="d">Decodes the text that gets pasted. About 1.1 GB of memory, shared with the Parakeet preview. “None” needs a Moonshine preview model.</div></div>
               <div class="ctl"><span class="select-wrap"><select class="input" aria-labelledby="l-fm" data-key="stt.final_model"><option value="parakeet-tdt-0.6b-v2-int8" selected>Parakeet TDT 0.6B v2 (default)</option><option value="">None: paste the preview model’s text</option></select><i data-icon="chevron-down" data-size="14"></i></span><span class="feedback" aria-hidden="true"></span></div>
             </div>
           </div>

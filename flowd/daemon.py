@@ -20,13 +20,14 @@ import numpy as np
 from flowd import guardrails
 from flowd.audio import MicrophoneStuck
 from flowd.cleanup import CleanupClient, CleanupResult
-from flowd.config import Config, Ui, config_path, reload_config, runtime_dir, state_dir
+from flowd.config import Config, Ui, config_path, data_dir, reload_config, runtime_dir, state_dir
 from flowd.context import AppContext, focused_app_id
 from flowd.inject import inject_text as real_inject
 from flowd.inject.base import InjectResult
 from flowd.joiner import stitch
 from flowd.levels import FLOOR_DB, LevelWindows
 from flowd.metrics import SessionMetrics, read_records, summarise, write_record
+from flowd.models import missing_stt_files
 from flowd.modes import Style, finish, style_for
 from flowd.recordings import SessionRecorder
 from flowd.scheduler import Scheduler
@@ -351,6 +352,9 @@ class Daemon:
             "state": str(self.machine.state),
             "stt_model": self.cfg.stt.model,
             "final_model": self.cfg.stt.final_model,
+            "stt_missing": missing_stt_files(
+                self.cfg.stt.model, self.cfg.stt.final_model, data_dir() / "models"
+            ),
             "cleanup": cleanup,
             "health_checked_s_ago": (
                 None if checked is None else round(time.monotonic() - checked, 1)

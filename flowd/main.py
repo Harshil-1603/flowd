@@ -17,7 +17,7 @@ import numpy as np
 
 from flowd import __version__
 from flowd.audio import AudioCapture, MicrophoneStuck, load_wav
-from flowd.config import Config, data_dir, load_config, runtime_dir, state_dir
+from flowd.config import PREVIEW_PARAKEET, Config, data_dir, load_config, runtime_dir, state_dir
 from flowd.context import detect
 from flowd.hybrid import HybridSttEngine, load_parakeet
 from flowd.inject.base import InjectResult
@@ -86,28 +86,36 @@ def _load_stt(cfg: Config) -> Any:
 
     spec 9.2: the caller exits non-zero, and systemd's `Restart=on-failure`
     backs off rather than flowd retrying in-process.
+
+    `[stt] model` picks what drives the preview (ADR 0016): Parakeet itself
+    decoding the open piece again, or a Moonshine model. The text that is
+    committed comes from `final_model` either way, unless that is empty.
     """
+    models = data_dir() / "models"
+    redecode = cfg.stt.model == PREVIEW_PARAKEET
+    live: Any = None
+    if not redecode:
+        try:
+            live = load_engine(
+                cfg.stt,
+                models,
+                cfg.audio.sample_rate,
+                vad_cfg=cfg.vad,
+                block_ms=cfg.audio.block_ms,
+            )
+        except Exception as exc:
+            log.error("could not load the STT model %r: %s", cfg.stt.model, exc)
+            log.error("check the model name in config.toml and your network for the first download")
+            return None
+        if not cfg.stt.final_model:
+            return live
     try:
-        live = load_engine(
-            cfg.stt,
-            data_dir() / "models",
-            cfg.audio.sample_rate,
-            vad_cfg=cfg.vad,
-            block_ms=cfg.audio.block_ms,
-        )
-    except Exception as exc:
-        log.error("could not load the STT model %r: %s", cfg.stt.model, exc)
-        log.error("check the model name in config.toml and your network for the first download")
-        return None
-    if not cfg.stt.final_model:
-        return live
-    try:
-        transcribe = load_parakeet(
-            data_dir() / "models" / cfg.stt.final_model, cfg.audio.sample_rate
-        )
+        transcribe = load_parakeet(models / cfg.stt.final_model, cfg.audio.sample_rate)
     except Exception as exc:
         log.error("could not load the final STT model %r: %s", cfg.stt.final_model, exc)
-        log.error('run scripts/fetch_models.sh, or set [stt] final_model = "" to go without')
+        log.error("run scripts/fetch_models.sh to download it")
+        if not redecode:
+            log.error('or set [stt] final_model = "" to go without')
         return None
     return HybridSttEngine(live, transcribe, sample_rate=cfg.audio.sample_rate)
 

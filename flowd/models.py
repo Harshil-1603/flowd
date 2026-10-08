@@ -13,6 +13,27 @@ log = logging.getLogger(__name__)
 _CHUNK = 1024 * 1024
 
 
+#: The files `scripts/fetch_models.sh` puts in each offline model's directory.
+PARAKEET_FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+
+
+def missing_stt_files(stt_model: str, final_model: str, models_dir: Path) -> list[str]:
+    """Model files the `[stt]` selection needs that are not on disk.
+
+    `stt_model` is a Moonshine model, which Moonshine fetches itself, or a
+    value that runs on the final model. The settings page shows a non-empty
+    result as "unavailable" before a restart that would fail.
+    """
+    missing: list[str] = []
+    if final_model:
+        missing += [
+            f"{final_model}/{name}"
+            for name in PARAKEET_FILES
+            if not (models_dir / final_model / name).is_file()
+        ]
+    return missing
+
+
 def sha256_file(path: Path) -> str:
     """Stream a file through SHA-256 so large weights never load into memory."""
     digest = hashlib.sha256()

@@ -133,7 +133,11 @@
     const w = F.w, d = s.daemon || {};
     w.setDaemon(true);
     w.setCleanup(d.cleanup || 'offline');
-    $('#st-models').innerHTML = `Speech ${w.badge('ok', 'circle-check', esc(d.stt_model || 'Ready'))}`;
+    const missing = d.stt_missing || [];
+    $('#st-models').innerHTML = missing.length
+      ? `Speech ${w.badge('warn', 'triangle-alert', 'Unavailable: model files missing')}`
+      : `Speech ${w.badge('ok', 'circle-check', esc(d.stt_model || 'Ready'))}`;
+    $('#st-models').title = missing.length ? `Missing: ${missing.join(', ')}. Run scripts/fetch_models.sh, then restart flowd.` : '';
     const mb = (s.memory || []).reduce((a, m) => a + (Number(m.anon_mb) || 0), 0);
     w.memory = { mb, budget: Number(s.budget_mb) || 1600 };
     $('#st-mem').innerHTML = `${I('memory-stick', 14)}<span class="tnum">${w.fmtMem(mb)} memory</span>`;

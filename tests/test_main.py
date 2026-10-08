@@ -215,10 +215,7 @@ def test_replay_writes_no_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     state_dir().mkdir(parents=True)
     clip = write_wav(tmp_path / "clip.wav", np.zeros(1600, dtype=np.float32))
 
-    moonshine_only = dataclasses.replace(
-        Config(), stt=dataclasses.replace(Config().stt, final_model="")
-    )
-    assert asyncio.run(main._replay(moonshine_only, clip, fast=True)) == 0
+    assert asyncio.run(main._replay(moonshine_cfg(final_model=""), clip, fast=True)) == 0
     assert not (state_dir() / "metrics.jsonl").exists()
 
 
@@ -232,6 +229,7 @@ def test_an_stt_model_that_fails_to_load_exits_non_zero_with_a_message(
 
     monkeypatch.setattr(main, "_verify_or_exit", lambda cfg: None)
     monkeypatch.setattr(main, "load_engine", broken)
+    monkeypatch.setattr(main, "load_config", lambda path=None: moonshine_cfg())
     with caplog.at_level("ERROR"):
         code = main.main([])
     assert code == main.EXIT_STT_LOAD
@@ -276,6 +274,13 @@ def test_a_stuck_microphone_exits_with_its_own_code(
 # --- the final model (ADR 0011) ----------------------------------------------
 
 
+def moonshine_cfg(**stt: Any) -> Config:
+    base = Config().stt
+    return dataclasses.replace(
+        Config(), stt=dataclasses.replace(base, model="small-streaming-en", **stt)
+    )
+
+
 def test_the_final_model_wraps_the_live_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     from flowd.hybrid import HybridSttEngine
 
@@ -283,16 +288,46 @@ def test_the_final_model_wraps_the_live_engine(monkeypatch: pytest.MonkeyPatch) 
     seen: list[Path] = []
     monkeypatch.setattr(main, "load_engine", lambda *a, **kw: live)
     monkeypatch.setattr(main, "load_parakeet", lambda path, rate: seen.append(path) or str)
-    engine = main._load_stt(Config())
+    engine = main._load_stt(moonshine_cfg())
     assert isinstance(engine, HybridSttEngine)
+    assert engine._live is live
     assert seen == [main.data_dir() / "models" / "parakeet-tdt-0.6b-v2-int8"]
 
 
 def test_without_a_final_model_moonshine_commits(monkeypatch: pytest.MonkeyPatch) -> None:
     live = FakeSttEngine([])
     monkeypatch.setattr(main, "load_engine", lambda *a, **kw: live)
-    cfg = dataclasses.replace(Config(), stt=dataclasses.replace(Config().stt, final_model=""))
-    assert main._load_stt(cfg) is live
+    assert main._load_stt(moonshine_cfg(final_model="")) is live
+
+
+def test_the_default_previews_with_parakeet_and_loads_no_moonshine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0016: no second model in memory, one load of Parakeet."""
+    from flowd.hybrid import HybridSttEngine
+
+    def no_moonshine(*a: Any, **kw: Any) -> Any:
+        raise AssertionError("Moonshine must not be loaded")
+
+    seen: list[Path] = []
+    monkeypatch.setattr(main, "load_engine", no_moonshine)
+    monkeypatch.setattr(main, "load_parakeet", lambda path, rate: seen.append(path) or str)
+    engine = main._load_stt(Config())
+    assert isinstance(engine, HybridSttEngine)
+    assert engine._live is None
+    assert seen == [main.data_dir() / "models" / "parakeet-tdt-0.6b-v2-int8"]
+
+
+def test_a_missing_parakeet_names_the_fetch_command(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def missing(*args: Any) -> Any:
+        raise FileNotFoundError("encoder.int8.onnx")
+
+    monkeypatch.setattr(main, "load_parakeet", missing)
+    with caplog.at_level("ERROR"):
+        assert main._load_stt(Config()) is None
+    assert any("scripts/fetch_models.sh" in r.getMessage() for r in caplog.records)
 
 
 def test_a_final_model_that_fails_to_load_exits_non_zero(
@@ -304,6 +339,7 @@ def test_a_final_model_that_fails_to_load_exits_non_zero(
     monkeypatch.setattr(main, "_verify_or_exit", lambda cfg: None)
     monkeypatch.setattr(main, "load_engine", lambda *a, **kw: FakeSttEngine([]))
     monkeypatch.setattr(main, "load_parakeet", broken)
+    monkeypatch.setattr(main, "load_config", lambda path=None: moonshine_cfg())
     with caplog.at_level("ERROR"):
         assert main.main([]) == main.EXIT_STT_LOAD
     assert any("Protobuf parsing failed" in r.getMessage() for r in caplog.records)
