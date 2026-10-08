@@ -177,17 +177,27 @@ def test_an_old_config_without_a_final_model_still_means_moonshine_only(tmp_path
     assert (cfg.stt.model, cfg.stt.final_model) == ("small-streaming-en", "")
 
 
-def test_the_parakeet_preview_without_a_final_model_is_refused(tmp_path: Path) -> None:
-    """The preview is the final model decoding the open piece; with none there is
-    nothing to decode with. Refused at load, with the way out in the message."""
+@pytest.mark.parametrize("value", ["parakeet-redecode", "nemotron-streaming-en-0.6b-560ms"])
+def test_a_preview_that_needs_the_final_model_is_refused_without_one(
+    tmp_path: Path, value: str
+) -> None:
+    """Parakeet re-decode decodes with the final model, and Nemotron only previews:
+    with no final model nothing would commit. Refused at load, with the way out
+    in the message."""
     path = tmp_path / "config.toml"
-    path.write_text('[stt]\nmodel = "parakeet-redecode"\nfinal_model = ""\n')
+    path.write_text(f'[stt]\nmodel = "{value}"\nfinal_model = ""\n')
     with pytest.raises(ValueError, match=r"final_model must name one.*small-streaming-en"):
         load_config(path)
 
 
 @pytest.mark.parametrize(
-    "value", ["parakeet-redecode", "small-streaming-en", "medium-streaming-en"]
+    "value",
+    [
+        "parakeet-redecode",
+        "nemotron-streaming-en-0.6b-560ms",
+        "small-streaming-en",
+        "medium-streaming-en",
+    ],
 )
 def test_the_preview_models_are_accepted(tmp_path: Path, value: str) -> None:
     path = tmp_path / "config.toml"

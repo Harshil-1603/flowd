@@ -94,17 +94,21 @@ class Vad:
 #: `[stt] model` value: the final model re-decodes the open piece for the
 #: preview, so there is no second model (ADR 0016).
 PREVIEW_PARAKEET = "parakeet-redecode"
+#: `[stt] model` value: Nemotron streams the preview (opt-in, +~940 MB); the
+#: final model still commits the text (ADR 0016).
+PREVIEW_NEMOTRON = "nemotron-streaming-en-0.6b-560ms"
 #: The Moonshine model flowd used before ADR 0016, for configs that predate it.
 LEGACY_PREVIEW = "small-streaming-en"
 #: Values of `[stt] model` that need `final_model`. Any other value names a
 #: Moonshine model, which Moonshine itself checks when it loads.
-_NEEDS_FINAL_MODEL = (PREVIEW_PARAKEET,)
+_NEEDS_FINAL_MODEL = (PREVIEW_PARAKEET, PREVIEW_NEMOTRON)
 
 
 @dataclass(frozen=True, slots=True)
 class Stt:
-    #: What drives the live preview (ADR 0016): "parakeet-redecode", or a
-    #: Moonshine model such as "small-streaming-en" (ADR 0005).
+    #: What drives the live preview (ADR 0016): "parakeet-redecode",
+    #: "nemotron-streaming-en-0.6b-560ms", or a Moonshine model such as
+    #: "small-streaming-en" (ADR 0005).
     model: str = PREVIEW_PARAKEET
     max_uncommitted_words: int = 25
     #: The offline model whose text is committed, a directory under the models
@@ -365,7 +369,7 @@ def _validate(cfg: Config) -> None:
         raise ValueError(f"[stt] final_model: must be a string, got {cfg.stt.final_model!r}")
     if cfg.stt.model in _NEEDS_FINAL_MODEL and not cfg.stt.final_model:
         raise ValueError(
-            f'[stt] model = "{cfg.stt.model}" previews with the final model, so '
+            f'[stt] model = "{cfg.stt.model}" needs the final model to commit the text, so '
             "final_model must name one; pick a Moonshine model such as "
             f'"{LEGACY_PREVIEW}" to go without'
         )

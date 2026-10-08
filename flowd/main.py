@@ -17,11 +17,20 @@ import numpy as np
 
 from flowd import __version__
 from flowd.audio import AudioCapture, MicrophoneStuck, load_wav
-from flowd.config import PREVIEW_PARAKEET, Config, data_dir, load_config, runtime_dir, state_dir
+from flowd.config import (
+    PREVIEW_NEMOTRON,
+    PREVIEW_PARAKEET,
+    Config,
+    data_dir,
+    load_config,
+    runtime_dir,
+    state_dir,
+)
 from flowd.context import detect
 from flowd.hybrid import HybridSttEngine, load_parakeet
 from flowd.inject.base import InjectResult
-from flowd.models import verify_models
+from flowd.models import NEMOTRON_DIR, verify_models
+from flowd.nemotron import load_nemotron
 from flowd.stt import load_engine
 
 log = logging.getLogger(__name__)
@@ -73,11 +82,16 @@ def _verify_or_exit(cfg: Config) -> None:
     if not lock.is_file():
         log.warning("no models.lock at %s; skipping verification", lock)
         return
-    problems = verify_models(lock, models)
+    # Nemotron is opt-in: its pins are checked only when it is the preview.
+    optional = () if cfg.stt.model == PREVIEW_NEMOTRON else (f"{NEMOTRON_DIR}/",)
+    problems = verify_models(lock, models, skip_prefixes=optional)
     if problems:
         for problem in problems:
             log.error("model verification: %s", problem)
-        log.error("refusing to start; run scripts/fetch_models.sh")
+        if cfg.stt.model == PREVIEW_NEMOTRON:
+            log.error("refusing to start; run scripts/fetch_models.sh --with-nemotron")
+        else:
+            log.error("refusing to start; run scripts/fetch_models.sh")
         raise SystemExit(2)
 
 
@@ -94,7 +108,14 @@ def _load_stt(cfg: Config) -> Any:
     models = data_dir() / "models"
     redecode = cfg.stt.model == PREVIEW_PARAKEET
     live: Any = None
-    if not redecode:
+    if cfg.stt.model == PREVIEW_NEMOTRON:
+        try:
+            live = load_nemotron(models / NEMOTRON_DIR, cfg.audio.sample_rate)
+        except Exception as exc:
+            log.error("could not load the preview model %r: %s", cfg.stt.model, exc)
+            log.error("run scripts/fetch_models.sh --with-nemotron to download it")
+            return None
+    elif not redecode:
         try:
             live = load_engine(
                 cfg.stt,
@@ -114,7 +135,7 @@ def _load_stt(cfg: Config) -> Any:
     except Exception as exc:
         log.error("could not load the final STT model %r: %s", cfg.stt.final_model, exc)
         log.error("run scripts/fetch_models.sh to download it")
-        if not redecode:
+        if not redecode and cfg.stt.model != PREVIEW_NEMOTRON:
             log.error('or set [stt] final_model = "" to go without')
         return None
     return HybridSttEngine(live, transcribe, sample_rate=cfg.audio.sample_rate)

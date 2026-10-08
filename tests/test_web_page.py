@@ -40,13 +40,14 @@ def test_every_config_key_has_a_control() -> None:
     assert shown - all_keys() == set()  # no stale mockup keys
 
 
-def test_the_preview_model_select_offers_the_three_engines_with_parakeet_first() -> None:
+def test_the_preview_model_select_offers_every_engine_with_parakeet_first() -> None:
     html = page()
     select = re.search(r'<select[^>]*data-key="stt\.model"[^>]*>(.*?)</select>', html, re.S)
     assert select is not None
     options = re.findall(r'<option value="([^"]+)"( selected)?>([^<]+)</option>', select.group(1))
     assert [value for value, _, _ in options] == [
         "parakeet-redecode",
+        "nemotron-streaming-en-0.6b-560ms",
         "small-streaming-en",
         "medium-streaming-en",
     ]
@@ -54,6 +55,7 @@ def test_the_preview_model_select_offers_the_three_engines_with_parakeet_first()
     labels = {value: text for value, _, text in options}
     assert "default" in labels["parakeet-redecode"]
     assert "legacy" in labels["small-streaming-en"]
+    assert "--with-nemotron" in labels["nemotron-streaming-en-0.6b-560ms"]
 
 
 def test_the_preview_model_select_is_restart_only_and_the_page_can_restart() -> None:

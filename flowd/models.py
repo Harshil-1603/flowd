@@ -8,6 +8,8 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
+from flowd.config import PREVIEW_NEMOTRON
+
 log = logging.getLogger(__name__)
 
 _CHUNK = 1024 * 1024
@@ -15,6 +17,9 @@ _CHUNK = 1024 * 1024
 
 #: The files `scripts/fetch_models.sh` puts in each offline model's directory.
 PARAKEET_FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+#: Opt-in preview model (ADR 0016): pinned in models.lock, but only checked, and
+#: only required, when `[stt] model` selects it.
+NEMOTRON_DIR = "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
 
 
 def missing_stt_files(stt_model: str, final_model: str, models_dir: Path) -> list[str]:
@@ -24,14 +29,15 @@ def missing_stt_files(stt_model: str, final_model: str, models_dir: Path) -> lis
     value that runs on the final model. The settings page shows a non-empty
     result as "unavailable" before a restart that would fail.
     """
-    missing: list[str] = []
-    if final_model:
-        missing += [
-            f"{final_model}/{name}"
-            for name in PARAKEET_FILES
-            if not (models_dir / final_model / name).is_file()
-        ]
-    return missing
+    wanted = [(final_model, PARAKEET_FILES)] if final_model else []
+    if stt_model == PREVIEW_NEMOTRON:
+        wanted.append((NEMOTRON_DIR, PARAKEET_FILES))
+    return [
+        f"{directory}/{name}"
+        for directory, names in wanted
+        for name in names
+        if not (models_dir / directory / name).is_file()
+    ]
 
 
 def sha256_file(path: Path) -> str:
@@ -48,6 +54,7 @@ def build_lock(
     sources: Mapping[str, tuple[str, str]],
     lock_path: Path,
     downloaded: frozenset[str] = frozenset(),
+    keep_prefixes: tuple[str, ...] = (),
 ) -> dict[str, list[dict[str, object]]]:
     """Build the models.lock document from the files on disk (spec 3).
 
@@ -64,6 +71,10 @@ def build_lock(
     A freshly downloaded file is the exception, because that is the upgrade path
     the script's own header documents: delete the file, re-run, review the
     models.lock diff. What arrives from the pinned URL is what gets pinned.
+
+    `keep_prefixes` names optional models: entries already in the lock under
+    one of these directories, and not in `sources`, are carried over as they
+    are. A run that did not fetch an optional model must not unpin it.
 
     Raises ValueError rather than returning problems, unlike `verify_models`:
     this runs in a script that must stop, and there is nothing useful to do with
@@ -104,18 +115,27 @@ def build_lock(
                 "license": licence,
             }
         )
+    for name, previous in pinned.items():
+        if name not in sources and name.startswith(keep_prefixes):
+            entries.append(previous)
+    entries.sort(key=lambda e: str(e["name"]))
     return {"models": entries}
 
 
-def verify_models(lock_path: Path, models_dir: Path) -> list[str]:
+def verify_models(
+    lock_path: Path, models_dir: Path, skip_prefixes: tuple[str, ...] = ()
+) -> list[str]:
     """Return one message per problem. An empty list means every file verified.
 
     The daemon refuses to start on any problem (spec 9.2), so the caller needs
-    every mismatch at once rather than only the first.
+    every mismatch at once rather than only the first. Entries under
+    `skip_prefixes` are optional models the config does not use.
     """
     entries = json.loads(lock_path.read_text())["models"]
     problems: list[str] = []
     for entry in entries:
+        if str(entry["name"]).startswith(skip_prefixes):
+            continue
         path = models_dir / entry["name"]
         if not path.is_file():
             problems.append(f"{entry['name']}: missing from {models_dir}")

@@ -11,6 +11,7 @@ import flowd.main as main
 from flowd.audio import MicrophoneStuck
 from flowd.config import Config, Hotkey, Logging, state_dir
 from flowd.main import _ReplayCapture, build_parser, lock_path, replay_config
+from flowd.models import NEMOTRON_DIR
 from flowd.stt import Committed, FakeSttEngine
 
 
@@ -316,6 +317,66 @@ def test_the_default_previews_with_parakeet_and_loads_no_moonshine(
     assert isinstance(engine, HybridSttEngine)
     assert engine._live is None
     assert seen == [main.data_dir() / "models" / "parakeet-tdt-0.6b-v2-int8"]
+
+
+def nemotron_cfg() -> Config:
+    base = Config().stt
+    return dataclasses.replace(
+        Config(), stt=dataclasses.replace(base, model="nemotron-streaming-en-0.6b-560ms")
+    )
+
+
+def test_nemotron_previews_and_parakeet_still_commits(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flowd.hybrid import HybridSttEngine
+
+    def no_moonshine(*a: Any, **kw: Any) -> Any:
+        raise AssertionError("Moonshine must not be loaded")
+
+    preview = FakeSttEngine([])
+    loaded: list[Path] = []
+    monkeypatch.setattr(main, "load_nemotron", lambda path, rate: loaded.append(path) or preview)
+    monkeypatch.setattr(main, "load_parakeet", lambda path, rate: str)
+    monkeypatch.setattr(main, "load_engine", no_moonshine)
+    engine = main._load_stt(nemotron_cfg())
+    assert isinstance(engine, HybridSttEngine)
+    assert engine._live is preview
+    assert loaded == [main.data_dir() / "models" / NEMOTRON_DIR]
+
+
+def test_missing_nemotron_files_name_the_fetch_option(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def missing(*args: Any) -> Any:
+        raise FileNotFoundError("encoder.int8.onnx")
+
+    monkeypatch.setattr(main, "load_nemotron", missing)
+    with caplog.at_level("ERROR"):
+        assert main._load_stt(nemotron_cfg()) is None
+    assert any("fetch_models.sh --with-nemotron" in r.getMessage() for r in caplog.records)
+
+
+def test_nemotron_pins_are_checked_only_when_it_is_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The default install does not fetch it, so a lock that pins it must not
+    stop flowd from starting."""
+    import json
+
+    lock = tmp_path / "models.lock"
+    entry = {
+        "name": f"{NEMOTRON_DIR}/tokens.txt",
+        "size_bytes": 1,
+        "sha256": "0" * 64,
+        "url": "https://example.invalid/x",
+        "license": "NVIDIA Open Model License",
+    }
+    lock.write_text(json.dumps({"models": [entry]}))
+    monkeypatch.setattr(main, "lock_path", lambda: lock)
+    main._verify_or_exit(Config())
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exited:
+        main._verify_or_exit(nemotron_cfg())
+    assert exited.value.code == 2
+    assert any("--with-nemotron" in r.getMessage() for r in caplog.records)
 
 
 def test_a_missing_parakeet_names_the_fetch_command(
