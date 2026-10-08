@@ -97,7 +97,10 @@ flowd was developed on a 6-core Ryzen 5 5600H. The live preview re-decodes the
 words you are saying with Parakeet, which takes about 2.3 s of CPU per second of
 audio while you dictate. On a slower machine, set `stt.model` to
 `small-streaming-en` (Moonshine, about 4 s of CPU per second of audio on the
-owner's voice, but streaming) or see [Configuration](#configuration).
+owner's voice, but streaming) or `nemotron-streaming-en-0.6b-560ms` (about 1.5 s
+of CPU per second of audio, about 940 MB more memory, fetched on request with
+`scripts/fetch_models.sh --with-nemotron`). See [Configuration](#configuration)
+and [ADR 0016](docs/decisions/0016-live-preview-engines.md).
 
 ### Quick install (Arch Linux)
 
@@ -220,6 +223,12 @@ verifies them against the SHA-256 pinned in [`models.lock`](models.lock), and
 warms the Moonshine model cache. It never upgrades a model behind your back: if
 a checksum does not match, it stops. flowd refuses to start if a pinned model
 fails verification; run the script again to repair it.
+
+The Nemotron streaming preview is optional (about 660 MB, NVIDIA Open Model
+License). Fetch it with `scripts/fetch_models.sh --with-nemotron`, then pick it
+under Recognition, Models, Preview model on the settings page and click
+Restart flowd, or set `model = "nemotron-streaming-en-0.6b-560ms"` under
+`[stt]` and restart.
 
 Install the user services (flowd must not run as root):
 
@@ -440,7 +449,8 @@ device = "default"
 max_session_s = 300
 
 [stt]
-model = "parakeet-redecode"     # the live preview; or small-streaming-en, medium-streaming-en (legacy Moonshine)
+model = "parakeet-redecode"     # the live preview; or nemotron-streaming-en-0.6b-560ms (opt-in, +~940 MB),
+                                # small-streaming-en, medium-streaming-en (legacy Moonshine)
 final_model = "parakeet-tdt-0.6b-v2-int8"  # commits the text; "" lets Moonshine commit (needs a Moonshine model above)
 
 [inject]
@@ -704,7 +714,10 @@ words are stale and focus may be elsewhere, so pasting them would be a guess.
 `scripts/idle_check.py` samples memory and CPU of the daemon, `flowd-ui` and
 `llama-server` for a minute and checks them against the budget (1,600 MB
 anonymous memory, 1 % CPU). `scripts/idle_check.py --soak 24` samples every 30
-minutes for a day and flags memory growth or a restarted process.
+minutes for a day and flags memory growth or a restarted process. With the
+Nemotron preview selected the daemon holds about 940 MB more, so expect
+`idle_check.py` to report over budget; the settings page raises its displayed
+budget by 950 MB in that case.
 
 </details>
 
