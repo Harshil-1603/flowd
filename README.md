@@ -46,7 +46,7 @@ https://github.com/user-attachments/assets/<id>
 | Feature | What it does |
 |---|---|
 | Live preview | A small indicator pill at the bottom of the screen and a popup that shows the text as you speak |
-| Streaming transcription | Moonshine streams a draft while you talk; Parakeet commits the final text |
+| Streaming transcription | Parakeet previews and commits the text by default; Nemotron and Moonshine are optional preview engines |
 | Smart cleanup | A small local LLM removes fillers, fixes punctuation and casing, and applies self-corrections ("five, no wait, six" → "6") |
 | Guardrails | Model output is checked for invented content; if it fails, or the model is slow or down, rule-based tidying is pasted instead |
 | Per-application modes | `code`, `chat`, `email` and `default`, picked from the focused window. Terminals paste with Ctrl+Shift+V |
@@ -158,7 +158,7 @@ Ubuntu 25.10's packaged build predates the `-cram` option in
 
 Install the typing tools for your **session**:
 
-- **GNOME Wayland (Ubuntu's default):** `sudo apt install ydotool`, then
+- **GNOME Wayland (Ubuntu's default):** `sudo apt install wl-clipboard ydotool`, then
   complete the [GNOME/Ubuntu ydotool setup](#gnome--ubuntu-ydotool-setup) below.
   `wtype` cannot type on GNOME because Mutter does not implement its virtual
   keyboard protocol. flowd needs **ydotool 1.x**; older releases that package
@@ -581,10 +581,11 @@ UNIT
 systemctl --user daemon-reload
 ```
 
-On GNOME Wayland, you can set `[inject] order = ["ydotool"]` in
-`~/.config/flowd/config.toml` to avoid trying unsupported clipboard/wtype
-keystrokes. flowd and ydotool must use the same `XDG_RUNTIME_DIR` (normally
-`/run/user/<uid>`), or the same explicit `YDOTOOL_SOCKET`.
+On GNOME Wayland, set `[inject] order = ["clipboard", "ydotool"]` in
+`~/.config/flowd/config.toml` for immediate paste through wl-clipboard and
+ydotool, with direct typing as a fallback. flowd and ydotool must use the
+same `XDG_RUNTIME_DIR` (normally `/run/user/<uid>`), or the same explicit
+`YDOTOOL_SOCKET`.
 
 > [!WARNING]
 > Access to `/dev/uinput` lets processes running as your desktop user simulate
