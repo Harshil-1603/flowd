@@ -42,6 +42,7 @@ _BOOKKEEPING_PREFIXES = ("chromium/x-",)
 
 #: Linux input event codes for Ctrl+Shift+V (KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_V).
 _TERMINAL_PASTE_KEYS = ("29", "42", "47")
+_PASTE_KEYS = ("29", "47")
 
 
 def _ydotool_ready() -> bool:
@@ -79,6 +80,7 @@ class ClipboardBackend:
         wayland: bool | None = None,
         have: Callable[[str], bool] = _tool_exists,
         ydotool: Callable[[], bool] = _ydotool_ready,
+        gnome: bool | None = None,
     ) -> None:
         self._run = runner
         self._sleep = sleep
@@ -86,6 +88,11 @@ class ClipboardBackend:
         self._wayland = _is_wayland() if wayland is None else wayland
         self._have = have
         self._ydotool = ydotool
+        self._gnome = (
+            "gnome" in os.environ.get("XDG_CURRENT_DESKTOP", "").casefold().split(":")
+            if gnome is None
+            else gnome
+        )
 
     def available(self) -> bool:
         # Checked per session type, not "either tool": reporting available and
@@ -104,7 +111,11 @@ class ClipboardBackend:
     def unavailable_reason(self) -> str | None:
         """The tools this session type needs that are not installed, or None."""
         missing = [tool for tool in self._required_tools() if not self._have(tool)]
-        return f"missing {', '.join(missing)}" if missing else None
+        if missing:
+            return f"missing {', '.join(missing)}"
+        if self._wayland and self._gnome and not self._ydotool():
+            return "ydotoold is not running (required for GNOME Wayland paste)"
+        return None
 
     def _required_tools(self) -> tuple[str, ...]:
         """Every command `inject` will run for this session type.
@@ -113,7 +124,7 @@ class ClipboardBackend:
         are two separate commands.
         """
         if self._wayland:
-            return ("wl-copy", "wl-paste", "wtype")
+            return ("wl-copy", "wl-paste", "ydotool" if self._gnome else "wtype")
         return ("xclip", "xdotool")
 
     def _tools(self) -> tuple[list[str], list[str], list[str]]:
@@ -131,12 +142,15 @@ class ClipboardBackend:
         if not self._wayland:
             self._run(["xdotool", "key", "--clearmodifiers", keys])
             return
-        if is_terminal:
+        if is_terminal or self._gnome:
             # wtype's virtual keyboard loses Shift in kitty: Ctrl+Shift+V from
             # wtype pastes nothing and exits 0 (checked live, kitty 0.48). Kernel
             # events from ydotool arrive with the modifier intact.
-            presses = [f"{code}:1" for code in _TERMINAL_PASTE_KEYS]
-            releases = [f"{code}:0" for code in reversed(_TERMINAL_PASTE_KEYS)]
+            # GNOME also needs kernel events for normal Ctrl+V: Mutter does
+            # not implement wtype's virtual-keyboard protocol.
+            codes = _TERMINAL_PASTE_KEYS if is_terminal else _PASTE_KEYS
+            presses = [f"{code}:1" for code in codes]
+            releases = [f"{code}:0" for code in reversed(codes)]
             self._run(["ydotool", "key", *presses, *releases])
             return
         *mods, key = keys.split("+")
@@ -155,10 +169,12 @@ class ClipboardBackend:
         self._run(copy, input=payload, capture=False)
 
     def inject(self, text: str, *, is_terminal: bool) -> None:
-        if self._wayland and is_terminal and not self._ydotool():
+        if self._wayland and (is_terminal or self._gnome) and not self._ydotool():
             # Checked before the clipboard is touched: no paste key would work,
             # so the turn goes to a typing backend with the clipboard intact.
-            raise RuntimeError("terminal paste on Wayland needs ydotool with ydotoold running")
+            raise RuntimeError(
+                "GNOME/terminal paste on Wayland needs ydotool with ydotoold running"
+            )
         list_types, paste, copy = self._tools()
 
         # Which exception comes back decides everything here, because "the

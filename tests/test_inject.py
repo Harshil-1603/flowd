@@ -95,6 +95,7 @@ def clipboard_writes(rec: Recorder, *, wayland: bool) -> list[bytes | None]:
 
 def wayland_clipboard(rec: Recorder, **kw: Any) -> ClipboardBackend:
     kw.setdefault("ydotool", lambda: True)
+    kw.setdefault("gnome", False)
     return ClipboardBackend(runner=rec.run, sleep=lambda _s: None, wayland=True, **kw)
 
 
@@ -114,7 +115,7 @@ DANGEROUS = "text; rm -rf ~ && echo $(whoami) `id` | tee /tmp/x\nsecond line"
 def test_clipboard_never_uses_a_shell(wayland: bool) -> None:
     """Dictated text must never be interpolated into a shell command."""
     rec = Recorder(types=WAYLAND_TEXT_TYPES if wayland else X11_TEXT_TARGETS)
-    ClipboardBackend(runner=rec.run, sleep=lambda _s: None, wayland=wayland).inject(
+    ClipboardBackend(runner=rec.run, sleep=lambda _s: None, wayland=wayland, gnome=False).inject(
         DANGEROUS, is_terminal=False
     )
     assert rec.calls, "the backend must have run something"
