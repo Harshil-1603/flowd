@@ -92,7 +92,7 @@ int run(int argc, char** argv) {
     }
 
     // Decided from the environment before GTK opens anything: with no
-    // display, or on GNOME Wayland, there is no surface to check, and GTK
+    // display, or on GNOME Wayland without XWayland, there is no surface, and GTK
     // init would only fail or open the wrong one. Layer-shell support needs
     // an open display, so it is assumed here and checked after init.
     const Decision d = choose_backend(read_env(), true);

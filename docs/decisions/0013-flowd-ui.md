@@ -123,3 +123,9 @@ warning states.
   `paste_failed`, ...), not text. `flowd-ui` owns the wording and falls back
   to a generic line for a code it does not know. `warn.reason` is still sent
   as the text to show.
+
+## GNOME XWayland follow-up
+
+[ADR 0017](0017-gnome-xwayland-preview.md) extends the verified X11 backend
+to GNOME Wayland sessions with an XWayland display. Native Wayland
+toplevels remain forbidden as preview surfaces.

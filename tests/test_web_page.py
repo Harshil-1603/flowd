@@ -48,6 +48,7 @@ def test_the_preview_model_select_offers_every_engine_with_parakeet_first() -> N
     assert [value for value, _, _ in options] == [
         "parakeet-redecode",
         "nemotron-streaming-en-0.6b-560ms",
+        "tiny-streaming-en",
         "small-streaming-en",
         "medium-streaming-en",
     ]
@@ -179,3 +180,9 @@ def test_template_interpolations_escape_outside_values() -> None:
 
 def test_demo_gallery_is_gone() -> None:
     assert 'id="states"' not in page()
+
+
+def test_the_documented_tiny_preview_model_can_be_selected() -> None:
+    select = re.search(r'<select[^>]*data-key="stt.model"[^>]*>(.*?)</select>', page(), re.S)
+    assert select is not None
+    assert 'value="tiny-streaming-en"' in select.group(1)

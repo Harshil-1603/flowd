@@ -258,7 +258,7 @@ A C++ program (gtkmm-4.0, gtk4-layer-shell), spawned and supervised by the daemo
 
 - **Indicator:** a small pill at the bottom edge, always present when `[ui] indicator = true`. Idle it is a dim 48 × 8 px line; on hover it expands to a mic button; recording shows a live level meter; finishing and warning states follow the design. Click toggles dictation; drag moves it along the bottom edge, with its position saved per output.
 - **Popup:** appears above the indicator while dictating. Three zones: polished (normal), pending (dimmed, underlined), live partial (italic, accent colour). Up to `[ui] max_lines` lines, auto-scrolls, fades out `[ui] fade_ms` after injection.
-- **Focus:** both are layer surfaces with keyboard interactivity `none`. On X11, override-redirect windows that never accept focus. On GNOME Wayland, which lacks layer-shell, `flowd-ui` disables itself and logs why. **A focus-stealing surface breaks injection and is worse than none.**
+- **Focus:** both are layer surfaces with keyboard interactivity `none`. On X11, override-redirect windows that never accept focus. On GNOME Wayland, use verified XWayland override-redirect surfaces when `DISPLAY` is available (ADR 0017); otherwise disable the UI and log why. **A focus-stealing surface breaks injection and is worse than none.**
 - **Text goes in at release.** The popup is a preview; the text is injected into the focused app when dictation stops. Typing into the app while speaking is version 2 (section 12).
 
 ### 5.9 flowctl
@@ -613,7 +613,7 @@ Every row below needs either an automated test or a logged manual check before t
 | Second daemon started | Socket already bound and responsive | New instance exits with "already running" |
 | Stale socket file | Bind fails, connect fails | Remove the stale file and bind |
 | `flowd-ui` crashes | Child exit | Continue without it, never ending the session; respawn with backoff, and at once on the next session |
-| `flowd-ui` would take focus | Backend can't guarantee no focus (GNOME Wayland) | `flowd-ui` disables itself, logs why and exits 3; not restarted until a reload |
+| `flowd-ui` would take focus | Backend cannot guarantee no focus (for example GNOME without XWayland) | `flowd-ui` disables itself, logs why and exits 3; not restarted until a reload |
 | Config invalid on reload | Validation error | Keep the old config; `flowctl reload` returns the error |
 
 ## 10. Performance budgets, logging and observability
@@ -714,7 +714,7 @@ In order, each done when its criteria pass:
 | Step | Deliverable | Acceptance criteria | Status |
 | --- | --- | --- | --- |
 | 7. Microphone release | ADR 0015 | While idle after start, a session, a cancel, device loss and resume, `pactl list source-outputs` shows no flowd stream and `pw-record` can record. `scripts/idle_check.py` reports no PipeWire client from flowd. Regression test with the fake stream factory passes. | Done |
-| 8. `flowd-ui` | ADR 0013: C++ indicator and popup | Click and hotkey both toggle. Drag, snap and per-output position work and survive restart. Neither surface takes focus on Hyprland, Sway, KDE and X11; GNOME Wayland disables with a logged reason. `flowd-ui` ≤ 40 MB anonymous memory. | Done on Hyprland; Sway, KDE and X11 not yet checked |
+| 8. `flowd-ui` | ADR 0013: C++ indicator and popup | Click and hotkey both toggle. Drag, snap and per-output position work and survive restart. Neither surface takes focus on Hyprland, Sway, KDE and X11; GNOME Wayland uses verified XWayland surfaces where available (ADR 0017). `flowd-ui` ≤ 40 MB anonymous memory. | Done on Hyprland; Sway, KDE and X11 not yet checked |
 | 9. Settings page | ADR 0014 | Every setting in 8.1 and `vocab.toml` editable; comments in `config.toml` survive a save. Token, `Host` and `Origin` checks and the `409` conflict are tested. Playwright tests pass, including 320 px width. | Done |
 | 10. Native build | ADR 0012: `make dist` | `dist/flowd`, `dist/flowctl`, `flowd-ui` run without a venv. pytest passes against the compiled modules. Targets in ADR 0012 met; 24 h soak on the built binaries shows no growth or restarts. |  |
 

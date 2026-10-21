@@ -122,8 +122,8 @@ run "$REPO_ROOT/scripts/fetch_models.sh"
 # Not fatal either way: without flowd-ui there is no indicator or preview, and
 # dictation works the same.
 step "Building flowd-ui"
-if ((GNOME_WAYLAND)); then
-  echo "    note: flowd-ui not built (GNOME Wayland has no layer-shell); dictation uses ydotool"
+if ((GNOME_WAYLAND)) && [[ -z "${DISPLAY:-}" ]]; then
+  echo "    note: flowd-ui not built (GNOME Wayland without XWayland); dictation uses ydotool"
 elif [[ "${FLOWD_UI_BUILD:-1}" != 0 ]] && command -v cmake >/dev/null 2>&1 &&
   command -v g++ >/dev/null 2>&1 &&
   pkg-config --exists gtkmm-4.0 gtk4-layer-shell-0 2>/dev/null; then

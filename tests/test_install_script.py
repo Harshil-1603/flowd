@@ -181,3 +181,54 @@ def test_a_llama_server_built_into_local_bin_is_found(tmp_path: Path) -> None:
     out = dry_run(tmp_path, PATH=path)
     assert "all present" in out
     assert f"ExecStart={local_bin}/llama-server " in out
+
+
+@pytest.mark.parametrize("desktop", ["GNOME", "ubuntu:GNOME", "Ubuntu:gNoMe"])
+def test_gnome_with_xwayland_builds_the_focus_safe_preview(tmp_path: Path, desktop: str) -> None:
+    """GNOME can use the X11 UI when its XWayland display is available."""
+    path = fake_path(
+        tmp_path,
+        "uv",
+        "curl",
+        "pw-cli",
+        "llama-server",
+        "ydotool",
+        "apt-get",
+        "cmake",
+        "g++",
+        "pkg-config",
+    )
+    out = dry_run(
+        tmp_path,
+        PATH=path,
+        WAYLAND_DISPLAY="wayland-0",
+        DISPLAY=":0",
+        XDG_CURRENT_DESKTOP=desktop,
+    )
+    assert "would run: cmake -S" in out
+    assert "flowd-ui not built" not in out
+
+
+def test_gnome_xwayland_still_respects_the_explicit_ui_skip(tmp_path: Path) -> None:
+    path = fake_path(
+        tmp_path,
+        "uv",
+        "curl",
+        "pw-cli",
+        "llama-server",
+        "ydotool",
+        "apt-get",
+        "cmake",
+        "g++",
+        "pkg-config",
+    )
+    out = dry_run(
+        tmp_path,
+        PATH=path,
+        WAYLAND_DISPLAY="wayland-0",
+        DISPLAY=":0",
+        XDG_CURRENT_DESKTOP="GNOME",
+        FLOWD_UI_BUILD="0",
+    )
+    assert "would run: cmake -S" not in out
+    assert "flowd-ui not built" in out

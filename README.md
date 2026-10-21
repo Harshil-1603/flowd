@@ -46,7 +46,7 @@ https://github.com/user-attachments/assets/<id>
 | Feature | What it does |
 |---|---|
 | Live preview | A small indicator pill at the bottom of the screen and a popup that shows the text as you speak |
-| Streaming transcription | Moonshine streams a draft while you talk; Parakeet commits the final text |
+| Streaming transcription | Parakeet previews and commits the text by default; Nemotron and Moonshine are optional preview engines |
 | Smart cleanup | A small local LLM removes fillers, fixes punctuation and casing, and applies self-corrections ("five, no wait, six" → "6") |
 | Guardrails | Model output is checked for invented content; if it fails, or the model is slow or down, rule-based tidying is pasted instead |
 | Per-application modes | `code`, `chat`, `email` and `default`, picked from the focused window. Terminals paste with Ctrl+Shift+V |
@@ -158,7 +158,7 @@ Ubuntu 25.10's packaged build predates the `-cram` option in
 
 Install the typing tools for your **session**:
 
-- **GNOME Wayland (Ubuntu's default):** `sudo apt install ydotool`, then
+- **GNOME Wayland (Ubuntu's default):** `sudo apt install wl-clipboard ydotool`, then
   complete the [GNOME/Ubuntu ydotool setup](#gnome--ubuntu-ydotool-setup) below.
   `wtype` cannot type on GNOME because Mutter does not implement its virtual
   keyboard protocol. flowd needs **ydotool 1.x**; older releases that package
@@ -177,9 +177,9 @@ make install
 flowctl status
 ```
 
-GNOME Wayland cannot display `flowd-ui`, so the installer skips that build.
-On other desktops the UI is optional: its Ubuntu build packages are `cmake`,
-`g++`, `pkg-config`, `libgtkmm-4.0-dev` and `libgtk4-layer-shell-dev`.
+GNOME Wayland can display `flowd-ui` through XWayland when `DISPLAY` is set.
+The UI is optional: its Ubuntu build packages are `cmake`, `g++`, `pkg-config`,
+`libgtkmm-4.0-dev` and `libgtk4-layer-shell-dev`.
 Ubuntu 24.04 has no gtk4-layer-shell package: leave the UI unbuilt with
 `FLOWD_UI_BUILD=0 make install`; dictation works without it.
 
@@ -353,12 +353,20 @@ Choose a free binding such as **Super+Alt+D**. Super+D is already assigned to
 show the desktop on Ubuntu. Adding a shortcut here keeps existing custom
 bindings intact.
 
-On GNOME under Wayland the indicator and preview popup are **disabled**, and
-flowd logs why at startup. GNOME's compositor does not implement
-`wlr-layer-shell`, the protocol that lets a window promise never to take
-keyboard focus. Without it, the popup could steal focus and your text would land
-in the popup instead of your editor. Dictation itself works normally. GNOME
-under X11 is fine.
+On GNOME Wayland with XWayland available (`DISPLAY` is set), the indicator
+and live popup use the X11 backend. Both windows are override-redirect and
+advertise `WM_HINTS input=False`; flowd reads these properties back before
+showing them. If a check fails, the window stays hidden. The dictation daemon
+and its typing backend continue to use Wayland. Without an XWayland display,
+the preview stays disabled because GNOME has no layer-shell protocol.
+See [ADR 0017](docs/decisions/0017-gnome-xwayland-preview.md).
+
+For immediate paste on GNOME Wayland, install `wl-clipboard` and ydotool 1.x,
+start the packaged `ydotool.service` user service (the name used by Ubuntu
+26.04), and grant the desktop user access to `/dev/uinput` as described below.
+Use `[inject] order = ["clipboard", "ydotool"]`: the clipboard backend sends
+Ctrl+V through ydotool and restores the previous text clipboard. Direct typing
+remains the fallback for non-text clipboard contents or unavailable tools.
 
 Typing on GNOME Wayland requires the [ydotool setup](#gnome--ubuntu-ydotool-setup).
 
@@ -500,7 +508,9 @@ When dictation starts, flowd reads the focused window's app id (via
 
 The built-in table covers common editors, chat apps and mail clients. Add your
 own under `[modes]`. Browsers report one id for every site, so a web app takes
-the browser's mode.
+the browser's mode. On GNOME/KDE Wayland, native application identity may
+be unavailable; flowd then uses `default` mode. XWayland preview support does
+not provide native Wayland app detection.
 
 ### Personal vocabulary
 
@@ -571,10 +581,11 @@ UNIT
 systemctl --user daemon-reload
 ```
 
-On GNOME Wayland, you can set `[inject] order = ["ydotool"]` in
-`~/.config/flowd/config.toml` to avoid trying unsupported clipboard/wtype
-keystrokes. flowd and ydotool must use the same `XDG_RUNTIME_DIR` (normally
-`/run/user/<uid>`), or the same explicit `YDOTOOL_SOCKET`.
+On GNOME Wayland, set `[inject] order = ["clipboard", "ydotool"]` in
+`~/.config/flowd/config.toml` for immediate paste through wl-clipboard and
+ydotool, with direct typing as a fallback. flowd and ydotool must use the
+same `XDG_RUNTIME_DIR` (normally `/run/user/<uid>`), or the same explicit
+`YDOTOOL_SOCKET`.
 
 > [!WARNING]
 > Access to `/dev/uinput` lets processes running as your desktop user simulate
@@ -663,7 +674,7 @@ meant.
 <details>
 <summary><b>The indicator is missing</b></summary>
 
-On GNOME/Wayland this is deliberate (see the GNOME hotkey section). Elsewhere,
+On GNOME/Wayland check that `DISPLAY` is set (XWayland is required). Also
 check that `flowd-ui` was built (`make ui` puts it in `build/ui/flowd-ui`), and
 look for the reason in the log:
 

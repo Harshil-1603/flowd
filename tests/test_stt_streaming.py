@@ -48,6 +48,7 @@ class FakeStream:
     script: list[list[FakeLine]] = field(default_factory=list)
     started: bool = False
     stopped: bool = False
+    closed: bool = False
     index: int = 0
     _listeners: list[object] = field(default_factory=list)
 
@@ -66,6 +67,9 @@ class FakeStream:
 
     def stop(self) -> None:
         self.stopped = True
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def engine(
@@ -337,7 +341,8 @@ def test_reset_discards_a_session_without_committing_it() -> None:
     e, made = _reusable()
     e.feed(BLOCK)
     e.reset()
-    assert made[0].stopped is True
+    assert made[0].closed is True
+    assert made[0].stopped is False
     assert e.finalize() == []
     assert e.feed(BLOCK) == [Partial("session 2")]
 
@@ -372,3 +377,25 @@ def test_set_keyterms_is_forwarded_to_the_transcriber() -> None:
 def test_set_keyterms_without_a_transcriber_hook_is_a_no_op() -> None:
     e, _ = engine([])
     e.set_keyterms(("LLM",))
+
+
+def test_finalize_releases_the_native_stream_after_flushing() -> None:
+    e, stream = engine([[line("final words", end_s=0.1)]])
+    e.feed(BLOCK)
+    assert e.finalize() == [Committed("final words")]
+    assert stream.stopped is True
+    assert stream.closed is True
+
+
+def test_discarding_a_preview_never_decodes_its_unwanted_tail() -> None:
+    """Moonshine stop() runs a final decode; reset's output is discarded."""
+    e, stream = engine([[line("preview words", end_s=0.1)]])
+    e.feed(BLOCK)
+
+    def unwanted_decode() -> None:
+        raise AssertionError("reset must not run stop's unwanted final decode")
+
+    stream.stop = unwanted_decode  # type: ignore[method-assign]
+    e.reset()
+    assert stream.closed is True
+    assert e.finalize() == []

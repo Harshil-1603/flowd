@@ -44,11 +44,14 @@ bool is_gnome(std::string_view desktops) {
 
 Decision choose_backend(const Env& env, bool layer_shell_supported) {
     if (present(env.wayland_display)) {
-        // Checked before layer-shell support: GNOME has no wlr-layer-shell,
-        // and even if a shim claimed one, focus could not be guaranteed.
-        if (env.xdg_current_desktop && is_gnome(*env.xdg_current_desktop))
+        // GNOME has no layer-shell. Its XWayland display can use the same
+        // verified override-redirect/non-input windows as Xorg (ADR 0017).
+        if (env.xdg_current_desktop && is_gnome(*env.xdg_current_desktop)) {
+            if (present(env.display))
+                return {Backend::X11, "GNOME Wayland using XWayland override-redirect windows"};
             return {Backend::Unsupported,
-                    "GNOME Wayland cannot guarantee the overlay never takes keyboard focus"};
+                    "GNOME Wayland without XWayland cannot guarantee the overlay never takes keyboard focus"};
+        }
         if (!layer_shell_supported)
             return {Backend::Unsupported,
                     "the Wayland compositor does not offer wlr-layer-shell, and a normal "

@@ -178,11 +178,10 @@ class StreamingSttEngine:
     def reset(self) -> None:
         """Drop the session without committing it (spec 9.4 cancel).
 
-        Whatever the stream emitted on the way out is thrown away with it: the
-        user cancelled, so nothing from this session may reach the target app.
+        Free the native stream directly. Moonshine's stop() runs one final
+        transcription, which is unnecessary when cancelling or when Parakeet
+        already supplies the final text, and can delay release by seconds.
         """
-        if self._stream is not None:
-            self._stop_stream(self._stream)
         self._discard()
 
     def set_keyterms(self, terms: Sequence[str]) -> None:
@@ -215,6 +214,13 @@ class StreamingSttEngine:
             log.warning("STT stream did not stop cleanly", exc_info=True)
 
     def _discard(self) -> None:
+        if self._stream is not None:
+            close = getattr(self._stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    log.warning("STT stream resources did not close cleanly", exc_info=True)
         self._stream = None
         self._pending.clear()
         self._lines.clear()
