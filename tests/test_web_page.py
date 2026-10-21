@@ -40,6 +40,34 @@ def test_every_config_key_has_a_control() -> None:
     assert shown - all_keys() == set()  # no stale mockup keys
 
 
+def test_the_preview_model_select_offers_every_engine_with_parakeet_first() -> None:
+    html = page()
+    select = re.search(r'<select[^>]*data-key="stt\.model"[^>]*>(.*?)</select>', html, re.S)
+    assert select is not None
+    options = re.findall(r'<option value="([^"]+)"( selected)?>([^<]+)</option>', select.group(1))
+    assert [value for value, _, _ in options] == [
+        "parakeet-redecode",
+        "nemotron-streaming-en-0.6b-560ms",
+        "small-streaming-en",
+        "medium-streaming-en",
+    ]
+    assert [value for value, chosen, _ in options if chosen] == [Config().stt.model]
+    labels = {value: text for value, _, text in options}
+    assert "default" in labels["parakeet-redecode"]
+    assert "legacy" in labels["small-streaming-en"]
+    assert "--with-nemotron" in labels["nemotron-streaming-en-0.6b-560ms"]
+
+
+def test_the_preview_model_select_is_restart_only_and_the_page_can_restart() -> None:
+    from flowd.config import applies
+
+    assert applies("stt.model") == "restart"
+    html = page()
+    assert 'id="restartNow"' in html and 'id="restartBanner"' in html
+    api_js = (WEB / "assets" / "settings-api.js").read_text()
+    assert "'/api/restart'" in api_js and "target: 'daemon'" in api_js
+
+
 def test_list_keys_are_widgets() -> None:
     assert set(re.findall(r'data-list-key="([^"]+)"', page())) >= WIDGET_KEYS
 

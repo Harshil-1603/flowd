@@ -1,11 +1,16 @@
-"""Live preview from Moonshine, committed text from an accurate offline model.
+"""Live preview from a streaming model, committed text from an accurate offline one.
 
-Moonshine streams, so it drives the overlay, but on a real speaker it was the
+A streaming model drives the overlay, but on a real speaker Moonshine was the
 weak link: 20% WER on the reference recording against 6.7% for Parakeet TDT
 0.6B v2 (ADR 0011). Parakeet is offline and needs context to be accurate, so
 the session's audio is cut into pieces of 8-20 s at pauses, and each piece is
 decoded on a worker while the user keeps talking. Only Parakeet's text is
-committed; Moonshine's commits are used for nothing but the preview.
+committed; the live model's commits are used for nothing but the preview.
+
+With no live model (`live=None`) the preview comes from Parakeet itself
+(ADR 0016): every `REDECODE_INTERVAL_S` of audio the open, not yet cut, piece
+is decoded again and shown. That adds no model memory, and the preview is the
+text that is about to be committed.
 """
 
 from __future__ import annotations
@@ -39,6 +44,11 @@ PAUSE_MS = 600
 #: Threads for the offline decode. The machine's other six are shared by
 #: Moonshine, llama-server and the overlay.
 FINAL_THREADS = 4
+#: How often the open piece is decoded again for the preview when Parakeet
+#: drives it. Measured on the reference recording: 0.7 s costs about 2.5x real
+#: time of CPU and shows words 0.42 s (p50) after they are spoken; 1.0 s costs
+#: 1.9x and lags more.
+REDECODE_INTERVAL_S = 0.7
 
 
 def _malloc_trim() -> None:
@@ -64,23 +74,30 @@ class _Piece:
     #: as the fallback text if the decode fails.
     start: int
     end: int
+    #: Without a live model: the last preview decode of this piece before it
+    #: was cut. Shown until the piece lands, and the fallback text if its
+    #: decode fails.
+    preview: str = ""
 
 
 class HybridSttEngine:
     def __init__(
         self,
-        live: SttEngine,
+        live: SttEngine | None,
         transcribe: Callable[[np.ndarray], str],
         sample_rate: int = 16000,
         executor: Executor | None = None,
         trim: Callable[[], None] = _malloc_trim,
+        redecode_interval_s: float = REDECODE_INTERVAL_S,
     ) -> None:
         self._live = live
         self._trim = trim
         self._transcribe = transcribe
         self._rate = sample_rate
+        self._interval = redecode_interval_s
         # One worker, so pieces decode in the order they were cut and never
-        # two at once on a model that was loaded once.
+        # two at once on a model that was loaded once. sherpa-onnx does not
+        # document `decode_stream` as safe to call from two threads.
         self._executor = executor or ThreadPoolExecutor(1, thread_name_prefix="flowd-final")
         self._blocks: list[np.ndarray] = []
         self._levels: list[float] = []
@@ -93,13 +110,24 @@ class HybridSttEngine:
         self._live_partial: list[str] = []
         self._shown = 0
         self._last_preview = ""
+        # Preview by re-decode (no live model). A preview decode is only
+        # submitted when the worker is idle and no piece is waiting, so a piece
+        # waits for at most the one preview decode already running. `_epoch`
+        # changes at every cut and reset, so a result that arrives after one
+        # belongs to audio that is no longer open and is dropped.
+        self._open_text = ""
+        self._since = 0.0
+        self._inflight: Future[str] | None = None
+        self._inflight_epoch = 0
+        self._epoch = 0
 
     # --- SttEngine ------------------------------------------------------
 
     def feed(self, pcm: np.ndarray) -> list[Event]:
         if pcm.size == 0:
             return []
-        self._fold(self._live.feed(pcm))
+        if self._live is not None:
+            self._fold(self._live.feed(pcm))
         block = np.asarray(pcm, dtype=np.float32).reshape(-1)
         self._blocks.append(block)
         level = float(np.sqrt(np.mean(block * block)))
@@ -107,6 +135,7 @@ class HybridSttEngine:
         self._marks.append(len(self._live_words))
         block_ms = 1000 * block.size / self._rate
         self._quiet_ms = self._quiet_ms + block_ms if level < QUIET_RMS else 0.0
+        self._since += block_ms / 1000
 
         seconds = self._buffered_seconds()
         if seconds >= MIN_PIECE_S and self._quiet_ms >= PAUSE_MS:
@@ -117,23 +146,30 @@ class HybridSttEngine:
         events: list[Event] = []
         while self._pieces and self._pieces[0].result.done():
             events.extend(self._commit(self._pieces.pop(0)))
+        if self._live is None:
+            self._redecode()
         events.extend(self._preview())
         return events
 
     def finalize(self) -> list[Event]:
         if self._blocks:
             self._cut(len(self._blocks))
+        self._drop_inflight()
         events: list[Event] = []
         live_finalized = False
         for piece in self._pieces:
-            if piece is self._pieces[-1] and piece.result.exception() is not None:
+            if (
+                self._live is not None
+                and piece is self._pieces[-1]
+                and piece.result.exception() is not None
+            ):
                 # The last piece's live text may still be in Moonshine's
                 # backlog, so let it finish before falling back to it.
                 self._fold(self._live.finalize())
                 piece.end = len(self._live_words)
                 live_finalized = True
             events.extend(self._commit(piece))
-        if not live_finalized:
+        if not live_finalized and self._live is not None:
             # Its tail is not wanted, and finalizing would make the user wait
             # for Moonshine to decode a backlog nobody will read.
             self._live.reset()
@@ -142,9 +178,11 @@ class HybridSttEngine:
         return events
 
     def reset(self) -> None:
-        self._live.reset()
+        if self._live is not None:
+            self._live.reset()
         for piece in self._pieces:
             piece.result.cancel()
+        self._drop_inflight()
         self._clear()
         self._trim()
 
@@ -179,9 +217,16 @@ class HybridSttEngine:
                 seconds=audio.size / self._rate,
                 start=self._piece_start,
                 end=end,
+                preview=self._open_text,
             )
         )
         self._piece_start = end
+        self._open_text = ""
+        self._since = 0.0
+        # A preview decode still queued would run before this piece: commits
+        # have priority. One already running cannot be stopped, so the piece
+        # waits for it, about 0.4 s.
+        self._drop_inflight()
         del self._blocks[:count], self._levels[:count], self._marks[:count]
         self._quiet_ms = 0.0
 
@@ -190,13 +235,48 @@ class HybridSttEngine:
             text = piece.result.result().strip()
         except Exception as exc:
             log.warning(
-                "final model failed on a %.1f s piece (%s); using the live transcript",
+                "final model failed on a %.1f s piece (%s); using the %s",
                 piece.seconds,
                 exc,
+                "live transcript" if self._live is not None else "last preview",
             )
-            text = " ".join(self._live_words[piece.start : piece.end])
+            text = piece.preview or " ".join(self._live_words[piece.start : piece.end])
         self._shown = max(self._shown, piece.end)
         return [Committed(text)] if text else []
+
+    # --- preview by re-decode --------------------------------------------
+
+    def _drop_inflight(self) -> None:
+        """Forget the running preview decode. It cannot be stopped once it has
+        started, so the reference stays until it finishes and keeps the next
+        submit from overlapping it."""
+        if self._inflight is not None and self._inflight.cancel():
+            self._inflight = None
+        self._epoch += 1
+
+    def _redecode(self) -> None:
+        """Take a finished preview decode, then start the next one if due.
+
+        Never queues: a tick that finds the worker busy, or a piece waiting
+        for it, is skipped, and the next one decodes more audio anyway.
+        """
+        inflight = self._inflight
+        if inflight is not None:
+            if not inflight.done():
+                return
+            self._inflight = None
+            if not inflight.cancelled() and self._inflight_epoch == self._epoch:
+                try:
+                    self._open_text = inflight.result().strip()
+                except Exception as exc:
+                    log.warning("preview decode failed (%s)", exc)
+        if not self._blocks or self._since < self._interval:
+            return
+        if any(not piece.result.done() for piece in self._pieces):
+            return
+        self._since = 0.0
+        self._inflight_epoch = self._epoch
+        self._inflight = self._executor.submit(self._transcribe, np.concatenate(self._blocks))
 
     # --- live preview ---------------------------------------------------
 
@@ -220,7 +300,11 @@ class HybridSttEngine:
         piece takes to decode. An empty preview is not emitted: it only
         follows a commit, which clears the live zone itself.
         """
-        text = " ".join(self._live_words[self._shown :])
+        if self._live is None:
+            parts = [piece.preview for piece in self._pieces] + [self._open_text]
+            text = " ".join(part for part in parts if part)
+        else:
+            text = " ".join(self._live_words[self._shown :])
         if text == self._last_preview:
             return []
         self._last_preview = text
@@ -237,6 +321,8 @@ class HybridSttEngine:
         self._live_partial = []
         self._shown = 0
         self._last_preview = ""
+        self._open_text = ""
+        self._since = 0.0
 
 
 def load_parakeet(model_dir: Path, sample_rate: int = 16000) -> Callable[[np.ndarray], str]:

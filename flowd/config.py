@@ -91,13 +91,30 @@ class Vad:
     lag_allowance_ms: int = 900
 
 
+#: `[stt] model` value: the final model re-decodes the open piece for the
+#: preview, so there is no second model (ADR 0016).
+PREVIEW_PARAKEET = "parakeet-redecode"
+#: `[stt] model` value: Nemotron streams the preview (opt-in, +~940 MB); the
+#: final model still commits the text (ADR 0016).
+PREVIEW_NEMOTRON = "nemotron-streaming-en-0.6b-560ms"
+#: The Moonshine model flowd used before ADR 0016, for configs that predate it.
+LEGACY_PREVIEW = "small-streaming-en"
+#: Values of `[stt] model` that need `final_model`. Any other value names a
+#: Moonshine model, which Moonshine itself checks when it loads.
+_NEEDS_FINAL_MODEL = (PREVIEW_PARAKEET, PREVIEW_NEMOTRON)
+
+
 @dataclass(frozen=True, slots=True)
 class Stt:
-    model: str = "small-streaming-en"  # ADR 0005
+    #: What drives the live preview (ADR 0016): "parakeet-redecode",
+    #: "nemotron-streaming-en-0.6b-560ms", or a Moonshine model such as
+    #: "small-streaming-en" (ADR 0005).
+    model: str = PREVIEW_PARAKEET
     max_uncommitted_words: int = 25
     #: The offline model whose text is committed, a directory under the models
-    #: dir; `model` then only drives the preview (ADR 0011). Empty commits
-    #: Moonshine's own text, as before.
+    #: dir (ADR 0011). With `model = "parakeet-redecode"` it also drives the
+    #: preview. Empty commits Moonshine's own text, as before, and needs a
+    #: Moonshine `model`.
     final_model: str = "parakeet-tdt-0.6b-v2-int8"
 
 
@@ -346,6 +363,16 @@ def _validate(cfg: Config) -> None:
         raise ValueError(f"[llm] url: must be a string, got {cfg.llm.url!r}")
     if urlsplit(cfg.llm.url).hostname not in _LOOPBACK_HOSTS:
         raise ValueError(f"[llm] url: must point at this machine ({', '.join(_LOOPBACK_HOSTS)})")
+    if not isinstance(cfg.stt.model, str) or not cfg.stt.model:
+        raise ValueError(f"[stt] model: must be a model name, got {cfg.stt.model!r}")
+    if not isinstance(cfg.stt.final_model, str):
+        raise ValueError(f"[stt] final_model: must be a string, got {cfg.stt.final_model!r}")
+    if cfg.stt.model in _NEEDS_FINAL_MODEL and not cfg.stt.final_model:
+        raise ValueError(
+            f'[stt] model = "{cfg.stt.model}" needs the final model to commit the text, so '
+            "final_model must name one; pick a Moonshine model such as "
+            f'"{LEGACY_PREVIEW}" to go without'
+        )
     if not cfg.inject.order:
         raise ValueError("[inject] order: must list at least one backend")
     if cfg.ui.theme not in _VALID_THEMES:
@@ -390,6 +417,13 @@ def build_config(raw: dict[str, Any]) -> Config:
         if not isinstance(ui, dict):
             raise ValueError("[ui]: expected a table")
         raw["ui"] = {**legacy, **ui}
+
+    # Before ADR 0016 `model` was always a Moonshine model, and `final_model = ""`
+    # meant "Moonshine only". Such a file that never names `model` keeps meaning
+    # that, instead of tripping the new default's need for a final model.
+    stt = raw.get("stt")
+    if isinstance(stt, dict) and stt.get("final_model") == "" and "model" not in stt:
+        raw["stt"] = {**stt, "model": LEGACY_PREVIEW}
 
     defaults = Config()
     section_names = {f.name for f in fields(Config)}

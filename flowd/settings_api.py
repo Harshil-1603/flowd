@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypeGuard
 
 from flowd import audio, config_edit, stats, status
-from flowd.config import RESTART_KEYS, Config, applies
+from flowd.config import PREVIEW_NEMOTRON, RESTART_KEYS, Config, applies
 from flowd.config_edit import Conflict, Snapshot
 from flowd.metrics import read_records
 from flowd.settings_server import Reply, Stream
@@ -24,6 +24,9 @@ from flowd.textclean import basic_clean
 
 #: The page's memory budget line, in MB of anonymous memory across processes.
 BUDGET_MB = 1600
+#: What the Nemotron preview model adds to that budget while it is running
+#: (ADR 0016).
+NEMOTRON_EXTRA_MB = 950
 #: Longest text `POST /api/vocab/test` accepts.
 MAX_TEST_TEXT = 2000
 #: How many metrics records the stats overview reads ("All time").
@@ -57,8 +60,9 @@ class Backend(Protocol):
         ...
 
     def daemon_status(self) -> dict[str, Any]:
-        """`{"state", "stt_model", "final_model", "cleanup",
-        "health_checked_s_ago"}`. `cleanup` is "disabled", "offline" or
+        """`{"state", "stt_model", "final_model", "stt_missing", "cleanup",
+        "health_checked_s_ago"}`. `stt_missing` lists model files the saved
+        `[stt]` choice needs and the disk lacks. `cleanup` is "disabled", "offline" or
         "ready"; `health_checked_s_ago` is seconds since the last LLM health
         probe, or None before the first."""
         ...
@@ -360,7 +364,8 @@ class SettingsApi:
         return _ok(
             daemon=self._backend.daemon_status(),
             memory=[{"name": m.name, "pid": m.pid, "anon_mb": m.anon_mb} for m in memory],
-            budget_mb=BUDGET_MB,
+            budget_mb=BUDGET_MB
+            + (NEMOTRON_EXTRA_MB if self._running.stt.model == PREVIEW_NEMOTRON else 0),
             desktop=status.desktop(),
             **extra,
         )

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash
 def dry_run(tmp_path: Path, *, script: Path = SCRIPT, **env: str) -> str:
     """Run the installer with a throwaway HOME, so nothing real is touched."""
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     environment = {
         "PATH": os.environ["PATH"],
         "HOME": str(home),
@@ -151,3 +151,33 @@ def test_new_virtualenv_requests_a_supported_python(tmp_path: Path) -> None:
         shutil.copytree(REPO / directory, repo / directory)
     out = dry_run(tmp_path, script=repo / "scripts" / "install.sh")
     assert "would run: uv venv --python >=3.11" in out
+
+
+def test_cram_is_dropped_for_a_llama_server_without_it(tmp_path: Path) -> None:
+    """Ubuntu 25.10's llama.cpp predates -cram and would refuse to start."""
+    path = fake_path(tmp_path, "uv", "curl", "pw-cli", "xclip", "xdotool")
+    (Path(path) / "llama-server").write_text('#!/bin/sh\necho "-c, --ctx-size N"\n')
+    (Path(path) / "llama-server").chmod(0o755)
+    out = dry_run(tmp_path, PATH=path)
+    assert f"ExecStart={path}/llama-server " in out
+    assert "-cram" not in out
+
+
+def test_cram_is_kept_for_a_llama_server_with_it(tmp_path: Path) -> None:
+    path = fake_path(tmp_path, "uv", "curl", "pw-cli", "xclip", "xdotool")
+    (Path(path) / "llama-server").write_text('#!/bin/sh\necho "-cram, --cache-ram N"\n')
+    (Path(path) / "llama-server").chmod(0o755)
+    out = dry_run(tmp_path, PATH=path)
+    assert "-cram 0" in out
+
+
+def test_a_llama_server_built_into_local_bin_is_found(tmp_path: Path) -> None:
+    """Ubuntu 24.04 has no llama.cpp package; the README builds it into ~/.local/bin."""
+    path = fake_path(tmp_path, "uv", "curl", "pw-cli", "xclip", "xdotool")
+    local_bin = tmp_path / "home" / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    (local_bin / "llama-server").write_text('#!/bin/sh\necho "--cache-ram N"\n')
+    (local_bin / "llama-server").chmod(0o755)
+    out = dry_run(tmp_path, PATH=path)
+    assert "all present" in out
+    assert f"ExecStart={local_bin}/llama-server " in out

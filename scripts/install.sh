@@ -48,7 +48,7 @@ package_hint() {
     for package in "$@"; do
       case "$package" in
         uv) echo "    Install uv: https://docs.astral.sh/uv/getting-started/installation/" ;;
-        llama-cpp) echo "    Install llama-server: see Ubuntu / Debian in README.md" ;;
+        llama-cpp) echo "    Install llama-server: apt install llama.cpp (Ubuntu 25.10+), or build it (see Ubuntu / Debian in README.md)" ;;
         portaudio) packages+=(libportaudio2) ;;
         gtkmm-4.0) packages+=(g++ pkg-config libgtkmm-4.0-dev) ;;
         gtk4-layer-shell) packages+=(libgtk4-layer-shell-dev) ;;
@@ -78,7 +78,8 @@ missing=()
 need() { command -v "$1" >/dev/null 2>&1 || missing+=("$2"); }
 need uv uv
 need curl curl
-need llama-server llama-cpp
+# A llama-server built from source (Ubuntu 24.04) lives in ~/.local/bin.
+command -v llama-server >/dev/null 2>&1 || [[ -x "$BIN_DIR/llama-server" ]] || missing+=(llama-cpp)
 need pw-cli pipewire
 # Read once into a variable: `ldconfig -p | grep -q` would trip pipefail, since
 # grep exits at the first match and ldconfig then dies of SIGPIPE.
@@ -138,7 +139,18 @@ fi
 cores="$(lscpu -p=Core 2>/dev/null | grep -v '^#' | sort -u | wc -l)"
 threads="${FLOWD_LLM_THREADS:-$((cores - RESERVED_CORES))}"
 ((threads >= 1)) || threads=1
-llama_bin="$(command -v llama-server || echo /usr/bin/llama-server)"
+llama_bin="$(command -v llama-server || true)"
+if [[ -z "$llama_bin" && -x "$BIN_DIR/llama-server" ]]; then llama_bin="$BIN_DIR/llama-server"; fi
+llama_bin="${llama_bin:-/usr/bin/llama-server}"
+# `-cram` (prompt cache size) is newer than some distribution packages, e.g.
+# Ubuntu 25.10's llama.cpp, which would refuse to start with it. It only saves
+# memory, so drop it there.
+cram_flag="-cram 0 "
+# Captured first, for the same pipefail reason as the ldconfig check above.
+if [[ -x "$llama_bin" ]]; then
+  llama_help="$("$llama_bin" --help 2>&1 || true)"
+  [[ "$llama_help" == *--cache-ram* ]] || cram_flag=""
+fi
 
 # The shipped units carry three values that depend on this machine: where flowd
 # was installed, where the model lives, and how many threads llama-server gets.
@@ -149,6 +161,7 @@ render_llm() {
   sed -e "s|^Environment=FLOWD_MODEL=.*|Environment=FLOWD_MODEL=$DATA_DIR/models/$LLM_MODEL|" \
     -e "s|^ExecStart=/usr/bin/llama-server |ExecStart=$llama_bin |" \
     -e "s|-t [0-9][0-9]*$|-t $threads|" \
+    -e "s|-cram 0 |$cram_flag|" \
     "$REPO_ROOT/systemd/flowd-llm.service"
 }
 

@@ -17,7 +17,7 @@ THREADS=$(( PHYSICAL_CORES - 2 ))
 (( THREADS < 1 )) && THREADS=1
 
 [[ -f "$MODEL" ]] || { echo "Model missing at $MODEL. Run scripts/fetch_models.sh first." >&2; exit 1; }
-command -v llama-server >/dev/null || { echo "llama-server not found (pacman -S llama-cpp)." >&2; exit 1; }
+command -v llama-server >/dev/null || { echo "llama-server not found (Arch: pacman -S llama-cpp; Ubuntu: see README.md)." >&2; exit 1; }
 
 echo "==> Starting llama-server on 127.0.0.1:$PORT with -t $THREADS ($PHYSICAL_CORES physical cores)"
 llama-server -m "$MODEL" -c 1024 -np 1 -b 128 -ub 128 -cram 0 \

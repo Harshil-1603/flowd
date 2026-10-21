@@ -13,7 +13,7 @@ DEST="$(cd "$(dirname "$0")/.." && pwd)/eval/audio"
 TARBALL="$DEST/test-clean.tar.gz"
 UTTERANCES="${FLOWD_EVAL_UTTERANCES:-5}"
 
-command -v ffmpeg >/dev/null || { echo "ffmpeg not found (pacman -S ffmpeg)." >&2; exit 1; }
+command -v ffmpeg >/dev/null || { echo "ffmpeg not found (Arch: pacman -S ffmpeg; Ubuntu: apt install ffmpeg)." >&2; exit 1; }
 
 mkdir -p "$DEST"
 

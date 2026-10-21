@@ -136,3 +136,87 @@ def test_a_file_in_a_model_directory_is_pinned_by_its_relative_path(tmp_path: Pa
     lock_path.write_text(json.dumps(doc))
     assert doc["models"][0]["name"] == "parakeet/tokens.txt"
     assert verify_models(lock_path, models) == []
+
+
+# --- which STT files the selection needs ---------------------------------------
+
+
+def test_missing_stt_files_names_every_absent_parakeet_file(tmp_path: Path) -> None:
+    from flowd.models import missing_stt_files
+
+    model = tmp_path / "parakeet"
+    model.mkdir()
+    (model / "tokens.txt").write_text("x")
+    assert missing_stt_files("parakeet-redecode", "parakeet", tmp_path) == [
+        "parakeet/encoder.int8.onnx",
+        "parakeet/decoder.int8.onnx",
+        "parakeet/joiner.int8.onnx",
+    ]
+
+
+def test_missing_stt_files_is_empty_when_everything_is_there(tmp_path: Path) -> None:
+    from flowd.models import PARAKEET_FILES, missing_stt_files
+
+    (tmp_path / "parakeet").mkdir()
+    for name in PARAKEET_FILES:
+        (tmp_path / "parakeet" / name).write_text("x")
+    assert missing_stt_files("parakeet-redecode", "parakeet", tmp_path) == []
+
+
+def test_missing_stt_files_needs_nothing_without_a_final_model(tmp_path: Path) -> None:
+    from flowd.models import missing_stt_files
+
+    assert missing_stt_files("small-streaming-en", "", tmp_path) == []
+
+
+# --- optional models stay pinned when a run does not fetch them -----------------
+
+
+def test_a_run_without_an_optional_model_keeps_its_pins(tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    (models / "opt").mkdir(parents=True)
+    (models / "a.bin").write_bytes(b"a")
+    lock = tmp_path / "models.lock"
+    optional = {
+        "name": "opt/x.bin",
+        "size_bytes": 3,
+        "sha256": "1" * 64,
+        "url": "https://example.invalid/opt",
+        "license": "NVIDIA Open Model License",
+    }
+    lock.write_text(json.dumps({"models": [optional]}))
+    doc = build_lock(models, SOURCES, lock_path=lock, keep_prefixes=("opt/",))
+    assert [e["name"] for e in doc["models"]] == ["a.bin", "opt/x.bin"]
+    assert doc["models"][1] == optional
+
+
+def test_a_pin_outside_the_optional_prefixes_is_dropped_with_its_source(tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "a.bin").write_bytes(b"a")
+    lock = tmp_path / "models.lock"
+    stale = {"name": "gone.bin", "size_bytes": 1, "sha256": "2" * 64, "url": "u", "license": "MIT"}
+    lock.write_text(json.dumps({"models": [stale]}))
+    doc = build_lock(models, SOURCES, lock_path=lock, keep_prefixes=("opt/",))
+    assert [e["name"] for e in doc["models"]] == ["a.bin"]
+
+
+def test_verify_skips_entries_under_the_given_prefixes(tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    models.mkdir()
+    lock = _lock(tmp_path, "opt/x.bin", "0" * 64, 1)
+    assert len(verify_models(lock, models)) == 1
+    assert verify_models(lock, models, skip_prefixes=("opt/",)) == []
+
+
+def test_missing_stt_files_for_nemotron_are_only_asked_of_a_nemotron_choice(
+    tmp_path: Path,
+) -> None:
+    from flowd.models import NEMOTRON_DIR, PARAKEET_FILES, missing_stt_files
+
+    (tmp_path / "parakeet").mkdir()
+    for name in PARAKEET_FILES:
+        (tmp_path / "parakeet" / name).write_text("x")
+    assert missing_stt_files("parakeet-redecode", "parakeet", tmp_path) == []
+    missing = missing_stt_files("nemotron-streaming-en-0.6b-560ms", "parakeet", tmp_path)
+    assert missing == [f"{NEMOTRON_DIR}/{name}" for name in PARAKEET_FILES]

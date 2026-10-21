@@ -459,6 +459,49 @@ async def test_status_shape(api: SettingsApi, monkeypatch: pytest.MonkeyPatch) -
     }
 
 
+@pytest.mark.parametrize("choice", ["nemotron-streaming-en-0.6b-560ms", "small-streaming-en"])
+async def test_choosing_another_preview_model_sets_the_restart_notice(
+    api: SettingsApi, choice: str
+) -> None:
+    """Save plus one restart click applies it: the page shows the notice from
+    `restart_pending` and its button posts the daemon restart."""
+    body = {"etag": await etag(api), "changes": {"stt.model": choice}}
+    reply = await call(api, "PATCH", "/api/config", body)
+    assert reply.status == 200
+    assert reply.body["restart_pending"] == ["stt.model"]
+    assert reply.body["values"]["stt"]["model"] == choice
+    restart = await call(api, "POST", "/api/restart", {"target": "daemon"})
+    assert restart.status == 200
+
+
+async def test_choosing_parakeet_again_clears_the_restart_notice(api: SettingsApi) -> None:
+    await call(
+        api,
+        "PATCH",
+        "/api/config",
+        {"etag": await etag(api), "changes": {"stt.model": "small-streaming-en"}},
+    )
+    reply = await call(
+        api,
+        "PATCH",
+        "/api/config",
+        {"etag": await etag(api), "changes": {"stt.model": "parakeet-redecode"}},
+    )
+    assert reply.body["restart_pending"] == []
+
+
+async def test_status_raises_the_memory_budget_for_the_nemotron_preview(
+    backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nemotron adds about 940 MB (ADR 0016); the page must not call that over budget."""
+    monkeypatch.setattr(status, "memory", lambda: [])
+    monkeypatch.setattr(status, "desktop", lambda: "hyprland")
+    backend.config_file.write_text('[stt]\nmodel = "nemotron-streaming-en-0.6b-560ms"\n')
+    backend.cfg = load_config(backend.config_file)
+    reply = await call(SettingsApi(backend), "GET", "/api/status")
+    assert reply.body["budget_mb"] == 1600 + settings_api.NEMOTRON_EXTRA_MB
+
+
 async def test_status_with_devices(api: SettingsApi, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(status, "memory", lambda: [])
     devices = [{"name": "Mic", "default": True}]

@@ -83,11 +83,11 @@ def test_config_is_immutable() -> None:
         cfg.vad.commit_silence_ms = 1  # type: ignore[misc]
 
 
-def test_default_stt_model_is_small_streaming() -> None:
-    # Measured on a Ryzen 5 5600H over 80 LibriSpeech test-clean clips:
-    # small scored 3.71% WER against medium's 4.50% and decodes faster, so the
-    # overlay keeps up with continuous speech. See ADR 0005.
-    assert Stt().model == "small-streaming-en"
+def test_default_stt_model_is_the_parakeet_redecode_preview() -> None:
+    # ADR 0016: on the owner's voice Moonshine small previewed at 74% WER
+    # against what Parakeet commits; re-decoding with Parakeet itself is close
+    # to its commit and adds no model. Moonshine small stays selectable (ADR 0005).
+    assert Stt().model == "parakeet-redecode"
 
 
 def test_llm_health_defaults_follow_spec_5_5() -> None:
@@ -161,10 +161,56 @@ def test_the_final_model_defaults_to_parakeet() -> None:
     assert Config().stt.final_model == "parakeet-tdt-0.6b-v2-int8"
 
 
-def test_an_empty_final_model_is_accepted(tmp_path: Path) -> None:
+def test_an_empty_final_model_is_accepted_with_a_moonshine_preview(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[stt]\nmodel = "small-streaming-en"\nfinal_model = ""\n')
+    cfg = load_config(path)
+    assert (cfg.stt.model, cfg.stt.final_model) == ("small-streaming-en", "")
+
+
+def test_an_old_config_without_a_final_model_still_means_moonshine_only(tmp_path: Path) -> None:
+    """Before ADR 0016 `final_model = ""` alone turned Parakeet off; the new
+    default preview needs Parakeet, so the file must not stop flowd starting."""
     path = tmp_path / "config.toml"
     path.write_text('[stt]\nfinal_model = ""\n')
-    assert load_config(path).stt.final_model == ""
+    cfg = load_config(path)
+    assert (cfg.stt.model, cfg.stt.final_model) == ("small-streaming-en", "")
+
+
+@pytest.mark.parametrize("value", ["parakeet-redecode", "nemotron-streaming-en-0.6b-560ms"])
+def test_a_preview_that_needs_the_final_model_is_refused_without_one(
+    tmp_path: Path, value: str
+) -> None:
+    """Parakeet re-decode decodes with the final model, and Nemotron only previews:
+    with no final model nothing would commit. Refused at load, with the way out
+    in the message."""
+    path = tmp_path / "config.toml"
+    path.write_text(f'[stt]\nmodel = "{value}"\nfinal_model = ""\n')
+    with pytest.raises(ValueError, match=r"final_model must name one.*small-streaming-en"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "parakeet-redecode",
+        "nemotron-streaming-en-0.6b-560ms",
+        "small-streaming-en",
+        "medium-streaming-en",
+    ],
+)
+def test_the_preview_models_are_accepted(tmp_path: Path, value: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f'[stt]\nmodel = "{value}"\n')
+    assert load_config(path).stt.model == value
+
+
+@pytest.mark.parametrize("value", ["", 3, True])
+def test_a_preview_model_must_be_a_name(tmp_path: Path, value: object) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[stt]\nmodel = {value!r}\n".replace("True", "true"))
+    with pytest.raises(ValueError, match=r"\[stt\] model"):
+        load_config(path)
 
 
 def write_config(tmp_path: Path, text: str) -> Path:

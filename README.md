@@ -88,14 +88,20 @@ The full architecture is in [`docs/spec.md`](docs/spec.md), edge cases in
 
 ### Requirements
 
-- A Linux desktop (Hyprland, Sway, KDE Plasma, GNOME or any X11 window manager)
+- A Linux desktop (Hyprland, Sway, KDE Plasma, GNOME or any X11 window manager) on
+  Arch Linux, Ubuntu 24.04 or newer, or another distribution with the same packages
 - Python 3.11 or newer
 - A CPU with AVX2 (AVX-512 is not required)
 - About 1.1 GB of disk space for the models
 
-flowd was developed on a 6-core Ryzen 5 5600H, where streaming transcription
-runs at about 1.05× realtime. On a slower machine, set `stt.model` to
-`small-streaming-en` or `tiny-streaming-en` (see [Configuration](#configuration)).
+flowd was developed on a 6-core Ryzen 5 5600H. The live preview re-decodes the
+words you are saying with Parakeet, which takes about 2.3 s of CPU per second of
+audio while you dictate. On a slower machine, set `stt.model` to
+`small-streaming-en` (Moonshine, about 4 s of CPU per second of audio on the
+owner's voice, but streaming) or `nemotron-streaming-en-0.6b-560ms` (about 1.5 s
+of CPU per second of audio, about 940 MB more memory, fetched on request with
+`scripts/fetch_models.sh --with-nemotron`). See [Configuration](#configuration)
+and [ADR 0016](docs/decisions/0016-live-preview-engines.md).
 
 ### Quick install (Arch Linux)
 
@@ -112,7 +118,8 @@ also install `xclip` and `xdotool`.
 
 ### Ubuntu / Debian
 
-The installation was checked on **Ubuntu 26.04, GNOME Wayland, x86-64**.
+The installation was checked on **Ubuntu 26.04, GNOME Wayland, x86-64**; package
+and build steps were also checked on 24.04 and 25.10 in containers.
 Other Ubuntu/Debian releases use the same runtime dependencies, but their
 versions of llama.cpp, ydotool and the optional UI libraries differ.
 
@@ -126,19 +133,28 @@ Keep your desktop's existing PipeWire/PulseAudio setup. Install
 already on your `PATH`. The installer asks uv for Python 3.11 or newer, so an
 older system Python does not need to be replaced.
 
-For the cleanup server, Ubuntu 26.04 packages llama.cpp:
+For the cleanup server, Ubuntu 25.10 and newer package llama.cpp:
 
 ```bash
 sudo apt install llama.cpp
 llama-server --help
 ```
 
-If your release does not package it, follow llama.cpp's
-[CPU build instructions](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md#cpu-build)
-and put its `build/bin` directory on `PATH` before running `make install`.
+Ubuntu 24.04 does not package it. Build `llama-server` once (a few minutes;
+the installer finds it in `~/.local/bin`):
+
+```bash
+sudo apt install git cmake g++
+git clone --depth 1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
+cmake -S /tmp/llama.cpp -B /tmp/llama.cpp/build -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF
+cmake --build /tmp/llama.cpp/build --target llama-server -j
+install -Dm755 /tmp/llama.cpp/build/bin/llama-server ~/.local/bin/llama-server
+```
+
 The installer records the full path of `llama-server` in the user service.
-The server must support the options in `systemd/flowd-llm.service`, including
-`-cram` and the LFM2 model architecture; old distro builds may need upgrading.
+Ubuntu 25.10's packaged build predates the `-cram` option in
+`systemd/flowd-llm.service`; the installer notices and leaves it out.
 
 Install the typing tools for your **session**:
 
@@ -164,8 +180,8 @@ flowctl status
 GNOME Wayland cannot display `flowd-ui`, so the installer skips that build.
 On other desktops the UI is optional: its Ubuntu build packages are `cmake`,
 `g++`, `pkg-config`, `libgtkmm-4.0-dev` and `libgtk4-layer-shell-dev`.
-If your release lacks gtk4-layer-shell or has an older gtkmm than the UI
-requires, leave the UI unbuilt; dictation works without it.
+Ubuntu 24.04 has no gtk4-layer-shell package: leave the UI unbuilt with
+`FLOWD_UI_BUILD=0 make install`; dictation works without it.
 
 ### What the installer does
 
@@ -183,14 +199,15 @@ compositor. Continue with [Set up a hotkey](#1-set-up-a-hotkey).
 <details>
 <summary><b>Which packages do I need?</b></summary>
 
-| Package | Purpose |
-|---|---|
-| `pipewire`, `pipewire-pulse`, `portaudio` | Microphone capture |
-| `llama-cpp` | Runs the local cleanup model |
-| `wl-clipboard`, `wtype` | Typing and pasting on Wayland |
-| `xclip`, `xdotool` | Typing and pasting on X11 |
-| `ydotool` | Required on GNOME Wayland; optional fallback elsewhere ([setup](#ydotool-required-on-gnome-wayland-optional-elsewhere)) |
-| `cmake`, `gtkmm-4.0`, `gtk4-layer-shell` | Optional: build `flowd-ui`, the indicator and popup |
+| Arch package | Ubuntu package | Purpose |
+|---|---|---|
+| `uv` | not in apt: [install script](https://docs.astral.sh/uv/getting-started/installation/) | Python environment and dependencies |
+| `pipewire`, `pipewire-pulse`, `portaudio` | `pipewire-bin`, `pipewire-pulse`, `libportaudio2` | Microphone capture |
+| `llama-cpp` | `llama.cpp` (25.10+; build it on 24.04) | Runs the local cleanup model |
+| `wl-clipboard`, `wtype` | `wl-clipboard`, `wtype` | Typing and pasting on Wayland |
+| `xclip`, `xdotool` | `xclip`, `xdotool` | Typing and pasting on X11 |
+| `ydotool` | `ydotool` (1.x: Ubuntu 25.04+) | Required on GNOME Wayland; optional fallback elsewhere ([setup](#ydotool-required-on-gnome-wayland-optional-elsewhere)) |
+| `cmake`, `gtkmm-4.0`, `gtk4-layer-shell` | `cmake`, `g++`, `pkg-config`, `libgtkmm-4.0-dev`, `libgtk4-layer-shell-dev` (25.04+) | Optional: build `flowd-ui`, the indicator and popup |
 
 Without the `flowd-ui` packages the installer skips it, and dictation works the
 same with no indicator.
@@ -218,6 +235,12 @@ verifies them against the SHA-256 pinned in [`models.lock`](models.lock), and
 warms the Moonshine model cache. It never upgrades a model behind your back: if
 a checksum does not match, it stops. flowd refuses to start if a pinned model
 fails verification; run the script again to repair it.
+
+The Nemotron streaming preview is optional (about 660 MB, NVIDIA Open Model
+License). Fetch it with `scripts/fetch_models.sh --with-nemotron`, then pick it
+under Recognition, Models, Preview model on the settings page and click
+Restart flowd, or set `model = "nemotron-streaming-en-0.6b-560ms"` under
+`[stt]` and restart.
 
 Install the user services (flowd must not run as root):
 
@@ -438,8 +461,9 @@ device = "default"
 max_session_s = 300
 
 [stt]
-model = "small-streaming-en"    # or medium-streaming-en, tiny-streaming-en
-final_model = "parakeet-tdt-0.6b-v2-int8"  # commits the text; "" lets Moonshine commit
+model = "parakeet-redecode"     # the live preview; or nemotron-streaming-en-0.6b-560ms (opt-in, +~940 MB),
+                                # small-streaming-en, medium-streaming-en (legacy Moonshine)
+final_model = "parakeet-tdt-0.6b-v2-int8"  # commits the text; "" lets Moonshine commit (needs a Moonshine model above)
 
 [inject]
 order = ["clipboard", "wtype", "ydotool", "xdotool"]
@@ -673,7 +697,7 @@ records each one by check number, never with the text.
 |---|---|---|
 | 2 | A model file does not match `models.lock` | Run `scripts/fetch_models.sh`. systemd does not retry this one. |
 | 3 | The config file is invalid | The reason is on the line above, e.g. `flowd: invalid config: block_ms ...`. Fix `~/.config/flowd/config.toml`. |
-| 4 | A speech model failed to load | Usually a partial download: run `scripts/fetch_models.sh`. To run on Moonshine alone, set `[stt] final_model = ""`. |
+| 4 | A speech model failed to load | Usually a partial download: run `scripts/fetch_models.sh`. To run on Moonshine alone, set `[stt] model = "small-streaming-en"` and `final_model = ""`. |
 | 5 | An audio stream would not stop | systemd restarts flowd, which releases the microphone. If it repeats, check the log for the device that hung. |
 
 After fixing it, `systemctl --user reset-failed flowd` lets systemd try again.
@@ -702,7 +726,10 @@ words are stale and focus may be elsewhere, so pasting them would be a guess.
 `scripts/idle_check.py` samples memory and CPU of the daemon, `flowd-ui` and
 `llama-server` for a minute and checks them against the budget (1,600 MB
 anonymous memory, 1 % CPU). `scripts/idle_check.py --soak 24` samples every 30
-minutes for a day and flags memory growth or a restarted process.
+minutes for a day and flags memory growth or a restarted process. With the
+Nemotron preview selected the daemon holds about 940 MB more, so expect
+`idle_check.py` to report over budget; the settings page raises its displayed
+budget by 950 MB in that case.
 
 </details>
 

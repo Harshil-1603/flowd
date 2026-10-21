@@ -11,6 +11,7 @@ import flowd.main as main
 from flowd.audio import MicrophoneStuck
 from flowd.config import Config, Hotkey, Logging, state_dir
 from flowd.main import _ReplayCapture, build_parser, lock_path, replay_config
+from flowd.models import NEMOTRON_DIR
 from flowd.stt import Committed, FakeSttEngine
 
 
@@ -215,10 +216,7 @@ def test_replay_writes_no_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     state_dir().mkdir(parents=True)
     clip = write_wav(tmp_path / "clip.wav", np.zeros(1600, dtype=np.float32))
 
-    moonshine_only = dataclasses.replace(
-        Config(), stt=dataclasses.replace(Config().stt, final_model="")
-    )
-    assert asyncio.run(main._replay(moonshine_only, clip, fast=True)) == 0
+    assert asyncio.run(main._replay(moonshine_cfg(final_model=""), clip, fast=True)) == 0
     assert not (state_dir() / "metrics.jsonl").exists()
 
 
@@ -232,6 +230,7 @@ def test_an_stt_model_that_fails_to_load_exits_non_zero_with_a_message(
 
     monkeypatch.setattr(main, "_verify_or_exit", lambda cfg: None)
     monkeypatch.setattr(main, "load_engine", broken)
+    monkeypatch.setattr(main, "load_config", lambda path=None: moonshine_cfg())
     with caplog.at_level("ERROR"):
         code = main.main([])
     assert code == main.EXIT_STT_LOAD
@@ -276,6 +275,13 @@ def test_a_stuck_microphone_exits_with_its_own_code(
 # --- the final model (ADR 0011) ----------------------------------------------
 
 
+def moonshine_cfg(**stt: Any) -> Config:
+    base = Config().stt
+    return dataclasses.replace(
+        Config(), stt=dataclasses.replace(base, model="small-streaming-en", **stt)
+    )
+
+
 def test_the_final_model_wraps_the_live_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     from flowd.hybrid import HybridSttEngine
 
@@ -283,16 +289,106 @@ def test_the_final_model_wraps_the_live_engine(monkeypatch: pytest.MonkeyPatch) 
     seen: list[Path] = []
     monkeypatch.setattr(main, "load_engine", lambda *a, **kw: live)
     monkeypatch.setattr(main, "load_parakeet", lambda path, rate: seen.append(path) or str)
-    engine = main._load_stt(Config())
+    engine = main._load_stt(moonshine_cfg())
     assert isinstance(engine, HybridSttEngine)
+    assert engine._live is live
     assert seen == [main.data_dir() / "models" / "parakeet-tdt-0.6b-v2-int8"]
 
 
 def test_without_a_final_model_moonshine_commits(monkeypatch: pytest.MonkeyPatch) -> None:
     live = FakeSttEngine([])
     monkeypatch.setattr(main, "load_engine", lambda *a, **kw: live)
-    cfg = dataclasses.replace(Config(), stt=dataclasses.replace(Config().stt, final_model=""))
-    assert main._load_stt(cfg) is live
+    assert main._load_stt(moonshine_cfg(final_model="")) is live
+
+
+def test_the_default_previews_with_parakeet_and_loads_no_moonshine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0016: no second model in memory, one load of Parakeet."""
+    from flowd.hybrid import HybridSttEngine
+
+    def no_moonshine(*a: Any, **kw: Any) -> Any:
+        raise AssertionError("Moonshine must not be loaded")
+
+    seen: list[Path] = []
+    monkeypatch.setattr(main, "load_engine", no_moonshine)
+    monkeypatch.setattr(main, "load_parakeet", lambda path, rate: seen.append(path) or str)
+    engine = main._load_stt(Config())
+    assert isinstance(engine, HybridSttEngine)
+    assert engine._live is None
+    assert seen == [main.data_dir() / "models" / "parakeet-tdt-0.6b-v2-int8"]
+
+
+def nemotron_cfg() -> Config:
+    base = Config().stt
+    return dataclasses.replace(
+        Config(), stt=dataclasses.replace(base, model="nemotron-streaming-en-0.6b-560ms")
+    )
+
+
+def test_nemotron_previews_and_parakeet_still_commits(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flowd.hybrid import HybridSttEngine
+
+    def no_moonshine(*a: Any, **kw: Any) -> Any:
+        raise AssertionError("Moonshine must not be loaded")
+
+    preview = FakeSttEngine([])
+    loaded: list[Path] = []
+    monkeypatch.setattr(main, "load_nemotron", lambda path, rate: loaded.append(path) or preview)
+    monkeypatch.setattr(main, "load_parakeet", lambda path, rate: str)
+    monkeypatch.setattr(main, "load_engine", no_moonshine)
+    engine = main._load_stt(nemotron_cfg())
+    assert isinstance(engine, HybridSttEngine)
+    assert engine._live is preview
+    assert loaded == [main.data_dir() / "models" / NEMOTRON_DIR]
+
+
+def test_missing_nemotron_files_name_the_fetch_option(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def missing(*args: Any) -> Any:
+        raise FileNotFoundError("encoder.int8.onnx")
+
+    monkeypatch.setattr(main, "load_nemotron", missing)
+    with caplog.at_level("ERROR"):
+        assert main._load_stt(nemotron_cfg()) is None
+    assert any("fetch_models.sh --with-nemotron" in r.getMessage() for r in caplog.records)
+
+
+def test_nemotron_pins_are_checked_only_when_it_is_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The default install does not fetch it, so a lock that pins it must not
+    stop flowd from starting."""
+    import json
+
+    lock = tmp_path / "models.lock"
+    entry = {
+        "name": f"{NEMOTRON_DIR}/tokens.txt",
+        "size_bytes": 1,
+        "sha256": "0" * 64,
+        "url": "https://example.invalid/x",
+        "license": "NVIDIA Open Model License",
+    }
+    lock.write_text(json.dumps({"models": [entry]}))
+    monkeypatch.setattr(main, "lock_path", lambda: lock)
+    main._verify_or_exit(Config())
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exited:
+        main._verify_or_exit(nemotron_cfg())
+    assert exited.value.code == 2
+    assert any("--with-nemotron" in r.getMessage() for r in caplog.records)
+
+
+def test_a_missing_parakeet_names_the_fetch_command(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def missing(*args: Any) -> Any:
+        raise FileNotFoundError("encoder.int8.onnx")
+
+    monkeypatch.setattr(main, "load_parakeet", missing)
+    with caplog.at_level("ERROR"):
+        assert main._load_stt(Config()) is None
+    assert any("scripts/fetch_models.sh" in r.getMessage() for r in caplog.records)
 
 
 def test_a_final_model_that_fails_to_load_exits_non_zero(
@@ -304,6 +400,7 @@ def test_a_final_model_that_fails_to_load_exits_non_zero(
     monkeypatch.setattr(main, "_verify_or_exit", lambda cfg: None)
     monkeypatch.setattr(main, "load_engine", lambda *a, **kw: FakeSttEngine([]))
     monkeypatch.setattr(main, "load_parakeet", broken)
+    monkeypatch.setattr(main, "load_config", lambda path=None: moonshine_cfg())
     with caplog.at_level("ERROR"):
         assert main.main([]) == main.EXIT_STT_LOAD
     assert any("Protobuf parsing failed" in r.getMessage() for r in caplog.records)

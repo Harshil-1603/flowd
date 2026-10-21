@@ -80,3 +80,6 @@ daemon, `flowd-ui` and `llama-server`. Manual, 2026-09-27, 60 s idle:
 added Parakeet; the budget is now 1,600 MB, and the daemon alone measured
 about 1,140 MB anon idle with both models loaded (2026-09-28). The 24 h soak is
 `scripts/idle_check.py --soak 24`; record its result here when it finishes.
+The default preview (Parakeet re-decode, ADR 0016) loads no extra model, so
+this figure holds. Choosing the Nemotron preview adds about 940 MB and goes
+past the budget by design; the settings page shows a budget raised by 950 MB.

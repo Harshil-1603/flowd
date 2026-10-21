@@ -2273,6 +2273,13 @@ def test_daemon_status_reports_models_and_state() -> None:
     assert status["health_checked_s_ago"] is None
 
 
+def test_daemon_status_lists_model_files_the_selection_needs_but_lacks() -> None:
+    """The settings page shows the speech model as unavailable instead of
+    letting the next restart find out."""
+    d = daemon(FakeSttEngine([]))
+    assert "parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx" in d.daemon_status()["stt_missing"]
+
+
 def test_daemon_status_cleanup_states() -> None:
     d = daemon(FakeSttEngine([]))
     assert d.daemon_status()["cleanup"] == "offline"  # no client

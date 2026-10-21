@@ -4,7 +4,21 @@
 # Models are never auto-upgraded: a file already on disk is left alone. To move
 # to a new revision, delete it and re-run, then review the models.lock diff --
 # a changed hash means the upstream file changed.
+#
+#   scripts/fetch_models.sh                   the default models
+#   scripts/fetch_models.sh --with-nemotron   also the Nemotron preview model
+#                                             (~660 MB, for [stt] model =
+#                                             "nemotron-streaming-en-0.6b-560ms")
 set -euo pipefail
+
+WITH_NEMOTRON=0
+for arg in "$@"; do
+  case "$arg" in
+    --with-nemotron) WITH_NEMOTRON=1 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
+  esac
+done
 
 MODELS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/flowd/models"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,6 +34,13 @@ PARAKEET_DIR="parakeet-tdt-0.6b-v2-int8"
 PARAKEET_REV="1ab9323565ddb038682214b292f588070a538ce2"
 PARAKEET_URL="https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/$PARAKEET_REV"
 PARAKEET_FILES=(encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt)
+
+# Nemotron speech streaming EN 0.6B, 560 ms chunks, int8, as sherpa-onnx
+# exports it (ADR 0016). Opt-in. NVIDIA Open Model License. The release asset
+# is immutable, so the URL does not move under the lock.
+NEMOTRON_DIR="sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
+NEMOTRON_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$NEMOTRON_DIR.tar.bz2"
+NEMOTRON_FILES=(encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt)
 
 mkdir -p "$MODELS_DIR/$PARAKEET_DIR"
 
@@ -48,6 +69,32 @@ for file in "${PARAKEET_FILES[@]}"; do
   fi
 done
 
+if [[ "$WITH_NEMOTRON" == 1 ]]; then
+  echo "==> Fetching the Nemotron preview model (NVIDIA Open Model License, ~660 MB)"
+  missing=0
+  for file in "${NEMOTRON_FILES[@]}"; do
+    [[ -f "$MODELS_DIR/$NEMOTRON_DIR/$file" ]] || missing=1
+  done
+  if [[ "$missing" == 0 ]]; then
+    echo "    already present, skipping"
+  else
+    # Extracted next to its destination, so the move below is a rename and the
+    # tarball never has to fit on disk twice.
+    staging="$(mktemp -d "$MODELS_DIR/.nemotron.XXXXXX")"
+    trap 'rm -rf "$staging"' EXIT
+    curl -fL --progress-bar "$NEMOTRON_URL" | tar -xj -C "$staging" --strip-components=1 \
+      "${NEMOTRON_FILES[@]/#/$NEMOTRON_DIR/}"
+    mkdir -p "$MODELS_DIR/$NEMOTRON_DIR"
+    for file in "${NEMOTRON_FILES[@]}"; do
+      target="$MODELS_DIR/$NEMOTRON_DIR/$file"
+      if [[ ! -f "$target" ]]; then
+        mv "$staging/$file" "$target"
+        DOWNLOADED="$DOWNLOADED $NEMOTRON_DIR/$file"
+      fi
+    done
+  fi
+fi
+
 echo "==> Warming the STT model cache (MIT code; English weights)"
 # moonshine-voice fetches and CRC32C-verifies its own weights on first use, into
 # its own cache -- not into MODELS_DIR. Warming it here means the daemon never
@@ -71,25 +118,32 @@ echo "==> Writing $LOCK"
 # matches its pin must not be re-pinned is the kind of thing that needs a test
 # more than it needs to be inline.
 ( cd "$REPO_ROOT" && uv run python - "$MODELS_DIR" "$LOCK" "$LFM_FILE" "$LFM_URL" "$DOWNLOADED" \
-    "$PARAKEET_DIR" "$PARAKEET_URL" "${PARAKEET_FILES[@]}" <<'PY'
+    "$PARAKEET_DIR" "$PARAKEET_URL" "$WITH_NEMOTRON" "$NEMOTRON_DIR" "$NEMOTRON_URL" \
+    "${PARAKEET_FILES[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 from flowd.models import build_lock
 
-models_dir, lock_path, lfm_file, lfm_url, downloaded, parakeet_dir, parakeet_url = (
-    Path(sys.argv[1]),
-    Path(sys.argv[2]),
-    sys.argv[3],
-    sys.argv[4],
-    sys.argv[5],
-    sys.argv[6],
-    sys.argv[7],
-)
+(
+    models_dir,
+    lock_path,
+    lfm_file,
+    lfm_url,
+    downloaded,
+    parakeet_dir,
+    parakeet_url,
+    with_nemotron,
+    nemotron_dir,
+    nemotron_url,
+) = (Path(sys.argv[1]), Path(sys.argv[2]), *sys.argv[3:11])
 sources = {lfm_file: (lfm_url, "LFM Open License v1.0")}
-for name in sys.argv[8:]:
+for name in sys.argv[11:]:
     sources[f"{parakeet_dir}/{name}"] = (f"{parakeet_url}/{name}", "CC-BY-4.0")
+    if with_nemotron == "1":
+        # Same four file names; the release tarball is the one URL for all of them.
+        sources[f"{nemotron_dir}/{name}"] = (nemotron_url, "NVIDIA Open Model License")
 
 try:
     doc = build_lock(
@@ -97,6 +151,8 @@ try:
         sources,
         lock_path=lock_path,
         downloaded=frozenset(n for n in downloaded.split() if n),
+        # A run without --with-nemotron must not unpin a model fetched earlier.
+        keep_prefixes=(f"{nemotron_dir}/",),
     )
 except ValueError as exc:
     # A message, not a traceback: the reader has to act on this.

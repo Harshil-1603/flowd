@@ -69,6 +69,10 @@ sessions.
 Loading Parakeet only while dictating would stay under 900 MB but costs about
 2 s at every start. The owner chose accuracy and speed over the lower budget.
 
+ADR 0016 changes the preview, not this budget: the default preview now re-uses
+the Parakeet instance, so Moonshine is no longer loaded and the daemon stays at
+about 1,140 MB. The opt-in Nemotron preview adds about 940 MB on top.
+
 ## Consequences
 
 - One more dependency, `sherpa-onnx` (about 14 MB of wheels, with its own

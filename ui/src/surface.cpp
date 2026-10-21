@@ -223,7 +223,10 @@ bool make_overlay_surface(Gtk::Window& win, const char* ns, Edges anchors, Margi
     gtk_layer_set_exclusive_zone(w, kExclusiveZone);
     // A compositor's close request (e.g. on output removal) unmaps the window
     // instead of leaving a dead surface; the app decides whether to recreate.
+    // Older libraries (before 1.1) lack it and keep the surface mapped.
+#ifdef FLOWD_HAVE_LAYER_RESPECT_CLOSE
     gtk_layer_set_respect_close(w, TRUE);
+#endif
 
     // ADR 0003: trust what the library reports, not what was asked for.
     if (!gtk_layer_is_layer_window(w)) {
