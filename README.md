@@ -236,6 +236,18 @@ warms the Moonshine model cache. It never upgrades a model behind your back: if
 a checksum does not match, it stops. flowd refuses to start if a pinned model
 fails verification; run the script again to repair it.
 
+For the legacy Moonshine previews, pre-fetch the selected cache before restarting:
+
+```bash
+scripts/fetch_models.sh --with-moonshine-tiny    # tiny-streaming-en
+scripts/fetch_models.sh --with-moonshine-medium  # medium-streaming-en
+```
+
+These flags can be combined with each other and with `--with-nemotron`.
+Small Moonshine is cached on every run. Other Moonshine previews still use
+their verified downloader on first use if they were not fetched beforehand;
+pre-fetching keeps that download out of the daemon's startup.
+
 The Nemotron streaming preview is optional (about 660 MB, NVIDIA Open Model
 License). Fetch it with `scripts/fetch_models.sh --with-nemotron`, then pick it
 under Recognition, Models, Preview model on the settings page and click

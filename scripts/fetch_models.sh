@@ -9,13 +9,20 @@
 #   scripts/fetch_models.sh --with-nemotron   also the Nemotron preview model
 #                                             (~660 MB, for [stt] model =
 #                                             "nemotron-streaming-en-0.6b-560ms")
+#   scripts/fetch_models.sh --with-moonshine-tiny    cache tiny-streaming-en
+#   scripts/fetch_models.sh --with-moonshine-medium  cache medium-streaming-en
+# Optional flags can be combined. Moonshine small is always cached.
 set -euo pipefail
 
 WITH_NEMOTRON=0
+WITH_MOONSHINE_TINY=0
+WITH_MOONSHINE_MEDIUM=0
 for arg in "$@"; do
   case "$arg" in
     --with-nemotron) WITH_NEMOTRON=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --with-moonshine-tiny) WITH_MOONSHINE_TINY=1 ;;
+    --with-moonshine-medium) WITH_MOONSHINE_MEDIUM=1 ;;
+    -h|--help) sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/!p; }' "$0"; exit 0 ;;
     *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -98,14 +105,23 @@ fi
 echo "==> Warming the STT model cache (MIT code; English weights)"
 # moonshine-voice fetches and CRC32C-verifies its own weights on first use, into
 # its own cache -- not into MODELS_DIR. Warming it here means the daemon never
-# downloads at runtime. The call is the one recorded in ADR 0001, pinned to the
-# default model (ADR 0005); moonshine's own default for "en" is medium.
-( cd "$REPO_ROOT" && uv run python -c '
+# downloads at runtime for the models selected here. Keep the small cache
+# (ADR 0005), plus explicitly requested legacy previews; Moonshine's own
+# default for "en" is medium, so always pass the architecture (ADR 0001).
+moonshine_arches=(small-streaming)
+if ((WITH_MOONSHINE_TINY)); then moonshine_arches+=(tiny-streaming); fi
+if ((WITH_MOONSHINE_MEDIUM)); then moonshine_arches+=(medium-streaming); fi
+( cd "$REPO_ROOT" && uv run python - "${moonshine_arches[@]}" <<'PY'
+import sys
+
 from moonshine_voice import string_to_model_arch
 from moonshine_voice.download import get_model_for_language
-path, arch = get_model_for_language("en", string_to_model_arch("small-streaming"))
-print(f"    cached {arch.name} at {path}")
-' )
+
+for name in sys.argv[1:]:
+    path, arch = get_model_for_language("en", string_to_model_arch(name))
+    print(f"    cached {arch.name} at {path}")
+PY
+)
 
 echo "==> Writing $LOCK"
 # Regenerate the lock from what is actually on disk. Only files flowd fetches

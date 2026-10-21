@@ -68,7 +68,7 @@ here in the same commit.
 | Indicator clicked while finishing | Ignored. `test_daemon.py::test_a_click_while_finishing_is_ignored` |
 | GNOME Wayland | Use verified XWayland override-redirect/non-input surfaces if `DISPLAY` is present (ADR 0017); otherwise exit 3 and do not restart until reload. `ui/tests/test_backend.cpp`, `test_ui_ipc.py::test_unsupported_event_and_exit_3_stop_all_further_spawns` |
 | A fullscreen window on the indicator's output | The pill hides until the window leaves fullscreen. `ui/tests/test_output_events.cpp` (Hyprland and Sway fullscreen events) |
-| `flowd-ui` would take focus (ADR 0013) | Pending. Manual: click the indicator and drag it on Hyprland, Sway, KDE and X11; the paste still lands in the original app. GNOME Wayland uses the XWayland path only after the same per-window read-back checks (ADR 0017). |
+| `flowd-ui` would take focus (ADR 0013) | Manual, 2026-10-22, Ubuntu GNOME Wayland: the laptop user focused a field in a native Wayland app, clicked the indicator to start and stop dictation, then dragged the indicator and repeated. The user confirmed that text landed in the original field in both cases. This checks the interactive XWayland path, beyond the override-redirect/non-input read-back checks (ADR 0017). Equivalent click/drag checks on Hyprland, Sway, KDE and a native X11 session remain pending. |
 | Settings API reached from another origin (ADR 0014) | Pending: tests for a missing or wrong token, a foreign `Host`, a foreign `Origin`, and a stale etag (`409`). |
 | Config invalid on reload | `test_daemon.py::test_reload_with_bad_config_keeps_old`, `test_config.py::test_reload_keeps_old_config_on_error`. Manual, 2026-09-27: a bad `block_ms` was rejected by `flowctl reload` and the old config stayed. |
 

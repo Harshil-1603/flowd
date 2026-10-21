@@ -25,6 +25,20 @@ def test_loads_values_from_config(page_server: PageServer) -> None:
     expect(ptt).to_have_attribute("aria-checked", "false")
 
 
+def test_gnome_copy_contains_the_command_without_setup_prose(page_server: PageServer) -> None:
+    """GNOME's custom-shortcut Command field must receive only flowctl toggle."""
+    page = page_server.page
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    _open(page_server)
+    page.get_by_role("radio", name="GNOME", exact=True).click()
+    page.get_by_role("button", name="Copy gnome snippet", exact=True).click()
+    expect(page.get_by_role("button", name="Copy gnome snippet", exact=True)).to_contain_text(
+        "Copied"
+    )
+    assert page.evaluate("navigator.clipboard.readText()") == "flowctl toggle"
+    expect(page.locator("#snippets")).to_contain_text("Super+Alt+D")
+
+
 def test_toggle_saves_and_file_keeps_comments(page_server: PageServer) -> None:
     _open(page_server)
     page = page_server.page
