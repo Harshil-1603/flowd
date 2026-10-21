@@ -66,9 +66,9 @@ here in the same commit.
 | Stale socket file | `test_control.py::test_stale_socket_is_removed_and_rebound` |
 | `flowd-ui` crashes | Never ends a session. `test_daemon.py::test_a_ui_that_raises_on_every_call_never_costs_a_dictation`, `::test_levels_to_a_dead_ui_do_not_stop_the_session`, `test_ui_ipc.py::test_a_crashing_ui_is_respawned_up_to_the_limit`, `::test_a_ui_respawned_mid_dictation_gets_the_warning_popup_and_state`, `::test_broken_pipe_is_swallowed` |
 | Indicator clicked while finishing | Ignored. `test_daemon.py::test_a_click_while_finishing_is_ignored` |
-| GNOME Wayland | `flowd-ui` disables itself with a logged reason and exits 3; it is not restarted until a reload. `ui/tests/test_backend.cpp` ("GNOME on Wayland is disabled with a reason"), `test_ui_ipc.py::test_unsupported_event_and_exit_3_stop_all_further_spawns` |
+| GNOME Wayland | Use verified XWayland override-redirect/non-input surfaces if `DISPLAY` is present (ADR 0017); otherwise exit 3 and do not restart until reload. `ui/tests/test_backend.cpp`, `test_ui_ipc.py::test_unsupported_event_and_exit_3_stop_all_further_spawns` |
 | A fullscreen window on the indicator's output | The pill hides until the window leaves fullscreen. `ui/tests/test_output_events.cpp` (Hyprland and Sway fullscreen events) |
-| `flowd-ui` would take focus (ADR 0013) | Pending. Manual: click the indicator and drag it on Hyprland, Sway, KDE and X11; the paste still lands in the original app. GNOME Wayland disables `flowd-ui` with a logged reason. |
+| `flowd-ui` would take focus (ADR 0013) | Pending. Manual: click the indicator and drag it on Hyprland, Sway, KDE and X11; the paste still lands in the original app. GNOME Wayland uses the XWayland path only after the same per-window read-back checks (ADR 0017). |
 | Settings API reached from another origin (ADR 0014) | Pending: tests for a missing or wrong token, a foreign `Host`, a foreign `Origin`, and a stale etag (`409`). |
 | Config invalid on reload | `test_daemon.py::test_reload_with_bad_config_keeps_old`, `test_config.py::test_reload_keeps_old_config_on_error`. Manual, 2026-09-27: a bad `block_ms` was rejected by `flowctl reload` and the old config stayed. |
 

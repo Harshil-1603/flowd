@@ -16,11 +16,11 @@ TEST_CASE("backend: wayland without layer-shell is unsupported, never a toplevel
 }
 
 TEST_CASE("backend: GNOME on Wayland is disabled with a reason") {
-    auto d = choose_backend({"wayland-0", ":0", "GNOME", {}}, false);
+    auto d = choose_backend({"wayland-0", {}, "GNOME", {}}, false);
     CHECK(d.backend == Backend::Unsupported);
     CHECK(d.reason.find("GNOME") != std::string::npos);
     CHECK(d.reason.find("keyboard focus") != std::string::npos);
-    auto u = choose_backend({"wayland-0", ":0", "ubuntu:GNOME", {}}, false);
+    auto u = choose_backend({"wayland-0", {}, "ubuntu:GNOME", {}}, false);
     CHECK(u.backend == Backend::Unsupported);
 }
 
@@ -35,7 +35,7 @@ TEST_CASE("backend: GNOME matches per token and in any case") {
 
 TEST_CASE("backend: GNOME Wayland stays disabled even if layer-shell reads as present") {
     // ADR 0003: without a focus guarantee the overlay disables itself.
-    auto d = choose_backend({"wayland-0", ":0", "GNOME", {}}, true);
+    auto d = choose_backend({"wayland-0", {}, "GNOME", {}}, true);
     CHECK(d.backend == Backend::Unsupported);
     CHECK(d.reason.find("GNOME") != std::string::npos);
 }
@@ -89,4 +89,12 @@ TEST_CASE("backend: X11 origin keeps the window inside the workarea") {
     const X11Origin big = x11_origin(wa, 10, 6, 4000, 2000);
     CHECK(big.x == 0);
     CHECK(big.y == 30);
+}
+
+TEST_CASE("backend: GNOME Wayland uses verified override-redirect surfaces through XWayland") {
+    for (const auto* desktop : {"GNOME", "ubuntu:GNOME", "Ubuntu:gNoMe"}) {
+        auto d = choose_backend({"wayland-0", ":0", desktop, {}}, false);
+        CHECK(d.backend == Backend::X11);
+        CHECK(d.reason.find("XWayland") != std::string::npos);
+    }
 }

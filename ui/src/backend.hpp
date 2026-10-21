@@ -38,8 +38,8 @@ Env read_env();
 bool is_gnome(std::string_view xdg_current_desktop);
 
 // ADR 0003 and 0013: on Wayland only a layer surface with keyboard mode NONE
-// is acceptable, never a normal toplevel, and GNOME Wayland is always refused.
-// Without Wayland, an X display means override-redirect windows.
+// is acceptable, never a normal toplevel. GNOME can use verified XWayland
+// override-redirect windows (ADR 0017). Without Wayland, use X11 directly.
 Decision choose_backend(const Env& env, bool layer_shell_supported);
 
 // kDefaultRenderer unless GSK_RENDERER is set, in which case the user's
