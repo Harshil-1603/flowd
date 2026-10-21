@@ -92,6 +92,12 @@ include(GNUInstallDirs)
 set(FLOWD_FONTS_DIR "${CMAKE_INSTALL_FULL_DATADIR}/flowd/fonts" CACHE PATH
     "Directory of the bundled fonts in an installed build")
 target_compile_definitions(flowd-ui-gtk PRIVATE FLOWD_FONTS_DIR="${FLOWD_FONTS_DIR}")
+# gtk_layer_set_respect_close arrived in gtk4-layer-shell 1.1; Ubuntu 25.10
+# ships 1.0.4. The header has no version macros, so pkg-config decides.
+pkg_check_modules(FLOWD_LAYER_SHELL_RESPECT_CLOSE QUIET "gtk4-layer-shell-0>=1.1")
+if(FLOWD_LAYER_SHELL_RESPECT_CLOSE_FOUND)
+  target_compile_definitions(flowd-ui-gtk PRIVATE FLOWD_HAVE_LAYER_RESPECT_CLOSE=1)
+endif()
 
 set(FLOWD_GTK_SOURCES
   # GTK program sources
