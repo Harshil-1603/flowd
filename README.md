@@ -110,6 +110,65 @@ make install
 The package is `llama-cpp` from `extra`, not `llama.cpp` from the AUR. For X11,
 also install `xclip` and `xdotool`.
 
+### Ubuntu / Debian
+
+The installation was checked on **Ubuntu 26.04, GNOME Wayland, x86-64**.
+Other Ubuntu/Debian releases use the same runtime dependencies, but their
+versions of llama.cpp, ydotool and the optional UI libraries differ.
+
+```bash
+sudo apt update
+sudo apt install git make curl libportaudio2 pipewire
+```
+
+Keep your desktop's existing PipeWire/PulseAudio setup. Install
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/) if it is not
+already on your `PATH`. The installer asks uv for Python 3.11 or newer, so an
+older system Python does not need to be replaced.
+
+For the cleanup server, Ubuntu 26.04 packages llama.cpp:
+
+```bash
+sudo apt install llama.cpp
+llama-server --help
+```
+
+If your release does not package it, follow llama.cpp's
+[CPU build instructions](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md#cpu-build)
+and put its `build/bin` directory on `PATH` before running `make install`.
+The installer records the full path of `llama-server` in the user service.
+The server must support the options in `systemd/flowd-llm.service`, including
+`-cram` and the LFM2 model architecture; old distro builds may need upgrading.
+
+Install the typing tools for your **session**:
+
+- **GNOME Wayland (Ubuntu's default):** `sudo apt install ydotool`, then
+  complete the [GNOME/Ubuntu ydotool setup](#gnome--ubuntu-ydotool-setup) below.
+  `wtype` cannot type on GNOME because Mutter does not implement its virtual
+  keyboard protocol. flowd needs **ydotool 1.x**; older releases that package
+  0.x need an upgrade from [ydotool upstream](https://github.com/ReimuNotMoe/ydotool).
+- **Other Wayland desktops:** `sudo apt install wl-clipboard wtype`. The
+  compositor must implement wtype's virtual keyboard protocol; otherwise use
+  ydotool as above.
+- **X11:** `sudo apt install xclip xdotool`.
+
+Then install flowd:
+
+```bash
+git clone https://github.com/harshitsaini17/flowd
+cd flowd
+make install
+flowctl status
+```
+
+GNOME Wayland cannot display `flowd-ui`, so the installer skips that build.
+On other desktops the UI is optional: its Ubuntu build packages are `cmake`,
+`g++`, `pkg-config`, `libgtkmm-4.0-dev` and `libgtk4-layer-shell-dev`.
+If your release lacks gtk4-layer-shell or has an older gtkmm than the UI
+requires, leave the UI unbuilt; dictation works without it.
+
+### What the installer does
+
 `make install`:
 
 - sets up a virtualenv in the checkout,
@@ -130,7 +189,7 @@ compositor. Continue with [Set up a hotkey](#1-set-up-a-hotkey).
 | `llama-cpp` | Runs the local cleanup model |
 | `wl-clipboard`, `wtype` | Typing and pasting on Wayland |
 | `xclip`, `xdotool` | Typing and pasting on X11 |
-| `ydotool` | Optional fallback for apps that ignore the others ([setup](#ydotool-optional)) |
+| `ydotool` | Required on GNOME Wayland; optional fallback elsewhere ([setup](#ydotool-required-on-gnome-wayland-optional-elsewhere)) |
 | `cmake`, `gtkmm-4.0`, `gtk4-layer-shell` | Optional: build `flowd-ui`, the indicator and popup |
 
 Without the `flowd-ui` packages the installer skips it, and dictation works the
@@ -149,7 +208,7 @@ gtk4-layer-shell.
 ```bash
 git clone https://github.com/harshitsaini17/flowd
 cd flowd
-uv venv
+uv venv --python '>=3.11'
 uv pip install -e .
 scripts/fetch_models.sh
 ```
@@ -263,17 +322,13 @@ System Settings → Shortcuts → Add New → Command/URL, with the command
 <details>
 <summary><b>GNOME</b></summary>
 
-```bash
-path=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/flowd/
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings \
-  "['$path']"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$path \
-  name 'flowd dictation'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$path \
-  command 'flowctl toggle'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$path \
-  binding '<Super>d'
-```
+Open Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts
+and add a shortcut named `flowd dictation`. Use `flowctl toggle` as the
+command, or its full path (`~/.local/bin/flowctl`, with `~` replaced by your
+home directory) followed by `toggle` if it is not on the desktop's `PATH`.
+Choose a free binding such as **Super+Alt+D**. Super+D is already assigned to
+show the desktop on Ubuntu. Adding a shortcut here keeps existing custom
+bindings intact.
 
 On GNOME under Wayland the indicator and preview popup are **disabled**, and
 flowd logs why at startup. GNOME's compositor does not implement
@@ -281,6 +336,8 @@ flowd logs why at startup. GNOME's compositor does not implement
 keyboard focus. Without it, the popup could steal focus and your text would land
 in the popup instead of your editor. Dictation itself works normally. GNOME
 under X11 is fine.
+
+Typing on GNOME Wayland requires the [ydotool setup](#gnome--ubuntu-ydotool-setup).
 
 </details>
 
@@ -449,16 +506,64 @@ machine; flowd refuses to start with any other host. `final_timeout_ms` (800) is
 how long a release waits for the model before pasting the fallback. Dictations
 under five words skip the model (`[chunking] short_bypass_words`).
 
-### ydotool (optional)
+### ydotool (required on GNOME Wayland, optional elsewhere)
 
 Most applications accept text from the clipboard or from `wtype`/`xdotool`. A
 few (some Electron apps, games and terminals in unusual modes) accept only
 kernel-level input events, which is what `ydotool` provides. It needs write
 access to `/dev/uinput`, and **flowd will not set this up for you**, since it
-touches device permissions and a system group.
+touches device permissions.
+
+#### GNOME / Ubuntu ydotool setup
+
+On Ubuntu 26.04, the `ydotool` package includes `ydotoold` and the user service
+is named **`ydotool.service`**, not `ydotoold.service`. Give the active local
+desktop user access to uinput through udev, then start the service:
+
+```bash
+sudo modprobe uinput
+sudo tee /etc/udev/rules.d/70-flowd-uinput.rules >/dev/null <<'RULE'
+SUBSYSTEM=="misc", KERNEL=="uinput", TAG+="uaccess"
+RULE
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=change /sys/devices/virtual/misc/uinput
+systemctl --user enable --now ydotool.service
+```
+
+The rule deliberately runs before `73-seat-late.rules`, where udev applies
+the active session's ACL. Check `test -w /dev/uinput` and
+`systemctl --user is-active ydotool.service` before dictating. If the device
+is absent after reboot, add `uinput` to `/etc/modules-load.d/flowd.conf`.
+
+To have flowd start the helper with it, add a user-service dependency:
+
+```bash
+mkdir -p ~/.config/systemd/user/flowd.service.d
+cat > ~/.config/systemd/user/flowd.service.d/ydotool.conf <<'UNIT'
+[Unit]
+Wants=ydotool.service
+After=ydotool.service
+UNIT
+systemctl --user daemon-reload
+```
+
+On GNOME Wayland, you can set `[inject] order = ["ydotool"]` in
+`~/.config/flowd/config.toml` to avoid trying unsupported clipboard/wtype
+keystrokes. flowd and ydotool must use the same `XDG_RUNTIME_DIR` (normally
+`/run/user/<uid>`), or the same explicit `YDOTOOL_SOCKET`.
+
+> [!WARNING]
+> Access to `/dev/uinput` lets processes running as your desktop user simulate
+> keyboard and mouse input. These commands are an explicit setup step;
+> `make install` never changes device permissions or runs as root.
+
+For other distributions, check the packaged service name with
+`systemctl --user list-unit-files 'ydotool*'`. Some use `ydotoold.service`.
+If there is no user service, follow the distribution's ydotool setup. The
+group-based alternative below also works when an active-seat ACL is unsuitable.
 
 <details>
-<summary><b>Enable the ydotool backend</b></summary>
+<summary><b>Alternative: enable uinput access through a group</b></summary>
 
 ```bash
 sudo groupadd -f uinput
@@ -470,17 +575,19 @@ RULE
 
 sudo udevadm control --reload-rules
 sudo udevadm trigger
-systemctl --user enable --now ydotoold
 ```
 
 Log out and back in for the group change to take effect.
+Then enable the ydotool user service supplied by your distribution, using the
+service name found above.
 
 > [!WARNING]
 > Membership in the `uinput` group lets any process you run synthesise keyboard
 > and mouse input for your whole session.
 
-If you skip this, flowd never selects the `ydotool` backend. Remove it from
-`inject.order` to stop flowd trying.
+Without device access and a running daemon, ydotool cannot inject text.
+On desktops with another working backend you can remove it from
+`inject.order` to stop flowd trying. On GNOME Wayland it is required.
 
 </details>
 
