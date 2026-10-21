@@ -40,6 +40,38 @@ run() {
   fi
 }
 
+# Package names differ between distributions. uv and llama-server are not in
+# every Ubuntu release, so do not suggest an apt command that cannot work.
+package_hint() {
+  if command -v apt-get >/dev/null 2>&1; then
+    local packages=() package
+    for package in "$@"; do
+      case "$package" in
+        uv) echo "    Install uv: https://docs.astral.sh/uv/getting-started/installation/" ;;
+        llama-cpp) echo "    Install llama-server: see Ubuntu / Debian in README.md" ;;
+        portaudio) packages+=(libportaudio2) ;;
+        gtkmm-4.0) packages+=(g++ pkg-config libgtkmm-4.0-dev) ;;
+        gtk4-layer-shell) packages+=(libgtk4-layer-shell-dev) ;;
+        *) packages+=("$package") ;;
+      esac
+    done
+    if ((${#packages[@]})); then
+      echo "    On Ubuntu / Debian: sudo apt install ${packages[*]}"
+    fi
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "    On Arch Linux: sudo pacman -S --needed $*"
+  else
+    echo "    Install these system packages for your distribution: $* (see README.md)"
+  fi
+}
+
+# Ubuntu reports ubuntu:GNOME; match a desktop token, not only an exact value.
+GNOME_WAYLAND=0
+desktop="${XDG_CURRENT_DESKTOP:-}"
+if [[ -n "${WAYLAND_DISPLAY:-}" && ":${desktop,,}:" == *:gnome:* ]]; then
+  GNOME_WAYLAND=1
+fi
+
 # --- 1. system packages -------------------------------------------------------
 step "Checking system packages"
 missing=()
@@ -54,7 +86,10 @@ libs="$(ldconfig -p 2>/dev/null || true)"
 has_lib() { [[ "$libs" == *"$1"* ]]; }
 has_lib libportaudio.so || missing+=(portaudio)
 # One clipboard and one typing tool is enough; which ones depends on the session.
-if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+if ((GNOME_WAYLAND)); then
+  # Mutter does not implement the virtual-keyboard protocol used by wtype.
+  need ydotool ydotool
+elif [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
   need wl-copy wl-clipboard
   command -v wtype >/dev/null 2>&1 || command -v ydotool >/dev/null 2>&1 || missing+=(wtype)
 else
@@ -63,17 +98,20 @@ else
 fi
 if ((${#missing[@]})); then
   echo "    missing: ${missing[*]}"
-  echo "    On Arch Linux: sudo pacman -S --needed ${missing[*]}"
-  echo "    (other distributions: see Requirements in README.md)"
+  package_hint "${missing[@]}"
   if ((!DRY_RUN)); then exit 1; fi
 else
   echo "    all present"
+fi
+if ((GNOME_WAYLAND)); then
+  echo "    GNOME Wayland needs ydotoold running and /dev/uinput access."
+  echo "    See the GNOME / Ubuntu setup in README.md; no device permissions are changed here."
 fi
 
 # --- 2. Python environment and models ----------------------------------------
 step "Installing flowd into $REPO_ROOT/.venv"
 if [[ ! -x "$REPO_ROOT/.venv/bin/python" ]]; then
-  run uv venv "$REPO_ROOT/.venv"
+  run uv venv --python '>=3.11' "$REPO_ROOT/.venv"
 fi
 run uv pip install --python "$REPO_ROOT/.venv/bin/python" -e "$REPO_ROOT"
 
@@ -83,14 +121,17 @@ run "$REPO_ROOT/scripts/fetch_models.sh"
 # Not fatal either way: without flowd-ui there is no indicator or preview, and
 # dictation works the same.
 step "Building flowd-ui"
-if [[ "${FLOWD_UI_BUILD:-1}" != 0 ]] && command -v cmake >/dev/null 2>&1 &&
+if ((GNOME_WAYLAND)); then
+  echo "    note: flowd-ui not built (GNOME Wayland has no layer-shell); dictation uses ydotool"
+elif [[ "${FLOWD_UI_BUILD:-1}" != 0 ]] && command -v cmake >/dev/null 2>&1 &&
   command -v g++ >/dev/null 2>&1 &&
   pkg-config --exists gtkmm-4.0 gtk4-layer-shell-0 2>/dev/null; then
   run cmake -S "$REPO_ROOT/ui" -B "$REPO_ROOT/build/ui" -DCMAKE_BUILD_TYPE=Release
   run cmake --build "$REPO_ROOT/build/ui" -j
 else
   echo "    note: flowd-ui not built (needs cmake gtkmm-4.0 gtk4-layer-shell); flowd runs without the indicator"
-  echo "    On Arch Linux: sudo pacman -S --needed cmake gtkmm-4.0 gtk4-layer-shell"
+  package_hint cmake gtkmm-4.0 gtk4-layer-shell
+  echo "    If gtk4-layer-shell is not packaged by your release, skip the optional UI (see README.md)."
 fi
 
 # --- 3. systemd units ---------------------------------------------------------
