@@ -88,7 +88,8 @@ The full architecture is in [`docs/spec.md`](docs/spec.md), edge cases in
 
 ### Requirements
 
-- A Linux desktop (Hyprland, Sway, KDE Plasma, GNOME or any X11 window manager)
+- A Linux desktop (Hyprland, Sway, KDE Plasma, GNOME or any X11 window manager) on
+  Arch Linux, Ubuntu 24.04 or newer, or another distribution with the same packages
 - Python 3.11 or newer
 - A CPU with AVX2 (AVX-512 is not required)
 - About 1.1 GB of disk space for the models
@@ -117,7 +118,8 @@ also install `xclip` and `xdotool`.
 
 ### Ubuntu / Debian
 
-The installation was checked on **Ubuntu 26.04, GNOME Wayland, x86-64**.
+The installation was checked on **Ubuntu 26.04, GNOME Wayland, x86-64**; package
+and build steps were also checked on 24.04 and 25.10 in containers.
 Other Ubuntu/Debian releases use the same runtime dependencies, but their
 versions of llama.cpp, ydotool and the optional UI libraries differ.
 
@@ -131,19 +133,28 @@ Keep your desktop's existing PipeWire/PulseAudio setup. Install
 already on your `PATH`. The installer asks uv for Python 3.11 or newer, so an
 older system Python does not need to be replaced.
 
-For the cleanup server, Ubuntu 26.04 packages llama.cpp:
+For the cleanup server, Ubuntu 25.10 and newer package llama.cpp:
 
 ```bash
 sudo apt install llama.cpp
 llama-server --help
 ```
 
-If your release does not package it, follow llama.cpp's
-[CPU build instructions](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md#cpu-build)
-and put its `build/bin` directory on `PATH` before running `make install`.
+Ubuntu 24.04 does not package it. Build `llama-server` once (a few minutes;
+the installer finds it in `~/.local/bin`):
+
+```bash
+sudo apt install git cmake g++
+git clone --depth 1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
+cmake -S /tmp/llama.cpp -B /tmp/llama.cpp/build -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF
+cmake --build /tmp/llama.cpp/build --target llama-server -j
+install -Dm755 /tmp/llama.cpp/build/bin/llama-server ~/.local/bin/llama-server
+```
+
 The installer records the full path of `llama-server` in the user service.
-The server must support the options in `systemd/flowd-llm.service`, including
-`-cram` and the LFM2 model architecture; old distro builds may need upgrading.
+Ubuntu 25.10's packaged build predates the `-cram` option in
+`systemd/flowd-llm.service`; the installer notices and leaves it out.
 
 Install the typing tools for your **session**:
 
@@ -169,8 +180,8 @@ flowctl status
 GNOME Wayland cannot display `flowd-ui`, so the installer skips that build.
 On other desktops the UI is optional: its Ubuntu build packages are `cmake`,
 `g++`, `pkg-config`, `libgtkmm-4.0-dev` and `libgtk4-layer-shell-dev`.
-If your release lacks gtk4-layer-shell or has an older gtkmm than the UI
-requires, leave the UI unbuilt; dictation works without it.
+Ubuntu 24.04 has no gtk4-layer-shell package: leave the UI unbuilt with
+`FLOWD_UI_BUILD=0 make install`; dictation works without it.
 
 ### What the installer does
 
@@ -188,14 +199,15 @@ compositor. Continue with [Set up a hotkey](#1-set-up-a-hotkey).
 <details>
 <summary><b>Which packages do I need?</b></summary>
 
-| Package | Purpose |
-|---|---|
-| `pipewire`, `pipewire-pulse`, `portaudio` | Microphone capture |
-| `llama-cpp` | Runs the local cleanup model |
-| `wl-clipboard`, `wtype` | Typing and pasting on Wayland |
-| `xclip`, `xdotool` | Typing and pasting on X11 |
-| `ydotool` | Required on GNOME Wayland; optional fallback elsewhere ([setup](#ydotool-required-on-gnome-wayland-optional-elsewhere)) |
-| `cmake`, `gtkmm-4.0`, `gtk4-layer-shell` | Optional: build `flowd-ui`, the indicator and popup |
+| Arch package | Ubuntu package | Purpose |
+|---|---|---|
+| `uv` | not in apt: [install script](https://docs.astral.sh/uv/getting-started/installation/) | Python environment and dependencies |
+| `pipewire`, `pipewire-pulse`, `portaudio` | `pipewire-bin`, `pipewire-pulse`, `libportaudio2` | Microphone capture |
+| `llama-cpp` | `llama.cpp` (25.10+; build it on 24.04) | Runs the local cleanup model |
+| `wl-clipboard`, `wtype` | `wl-clipboard`, `wtype` | Typing and pasting on Wayland |
+| `xclip`, `xdotool` | `xclip`, `xdotool` | Typing and pasting on X11 |
+| `ydotool` | `ydotool` (1.x: Ubuntu 25.04+) | Required on GNOME Wayland; optional fallback elsewhere ([setup](#ydotool-required-on-gnome-wayland-optional-elsewhere)) |
+| `cmake`, `gtkmm-4.0`, `gtk4-layer-shell` | `cmake`, `g++`, `pkg-config`, `libgtkmm-4.0-dev`, `libgtk4-layer-shell-dev` (25.04+) | Optional: build `flowd-ui`, the indicator and popup |
 
 Without the `flowd-ui` packages the installer skips it, and dictation works the
 same with no indicator.
