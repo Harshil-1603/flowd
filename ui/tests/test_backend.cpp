@@ -15,7 +15,7 @@ TEST_CASE("backend: wayland without layer-shell is unsupported, never a toplevel
     CHECK(d.reason.find("layer-shell") != std::string::npos);
 }
 
-TEST_CASE("backend: GNOME on Wayland is disabled with a reason") {
+TEST_CASE("backend: GNOME Wayland without XWayland is disabled with a reason") {
     auto d = choose_backend({"wayland-0", {}, "GNOME", {}}, false);
     CHECK(d.backend == Backend::Unsupported);
     CHECK(d.reason.find("GNOME") != std::string::npos);
@@ -33,7 +33,7 @@ TEST_CASE("backend: GNOME matches per token and in any case") {
     CHECK_FALSE(is_gnome(""));
 }
 
-TEST_CASE("backend: GNOME Wayland stays disabled even if layer-shell reads as present") {
+TEST_CASE("backend: GNOME without XWayland stays disabled even if layer-shell reads as present") {
     // ADR 0003: without a focus guarantee the overlay disables itself.
     auto d = choose_backend({"wayland-0", {}, "GNOME", {}}, true);
     CHECK(d.backend == Backend::Unsupported);
